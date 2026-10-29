@@ -1,0 +1,6 @@
+{
+  "name": "SCORM Canva - E-Learning Course Studio",
+  "description": "Visual Canva-style authoring tool for SCORM 1.2 e-learning courses with interactive quizzes, AI generator, live player, and instant SCORM zip export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

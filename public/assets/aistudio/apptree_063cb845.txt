@@ -1,0 +1,84 @@
+scorm-canva/
+├── package.json                    # root, turbo
+├── pnpm-workspace.yaml
+├── turbo.json
+├── tsconfig.base.json
+├── .gitignore
+├── packages/
+│   ├── schema/                     # Zod contracts
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── index.ts
+│   │       ├── manifest.ts         # Node/Page/CourseManifest + width/height
+│   │       ├── assets.ts           # makeR2Key, parseR2Key, ALLOWED_ASSET_EXT
+│   │       ├── suspend.ts          # SUSPEND_PAYLOAD_VERSION
+│   │       └── hash.ts             # sha256Hex
+│   └── scorm-bridge/               # ⬅ extracted from player
+│       ├── package.json
+│       └── src/
+│           ├── index.ts
+│           ├── types.ts            # Scorm12Api interface
+│           ├── discovery.ts        # findScormApi (parent/opener/top chain)
+│           ├── client.ts           # ScormClient
+│           ├── suspend.ts          # lz-string base64 codec
+│           ├── time.ts             # CMITimespan formatter
+│           └── __tests__/
+│               ├── MockScormClient.ts
+│               └── bridge.test.ts
+├── apps/
+│   ├── editor/                     # React
+│   │   ├── package.json
+│   │   ├── vite.config.ts          # proxy /api → :8787
+│   │   ├── vitest.config.ts
+│   │   ├── vitest.setup.ts
+│   │   ├── tsconfig.json
+│   │   ├── index.html
+│   │   └── src/
+│   │       ├── main.tsx
+│   │       ├── App.tsx
+│   │       ├── store/store.ts      # Zustand + zundo
+│   │       ├── hooks/
+│   │       │   ├── useKeyboardShortcuts.ts
+│   │       │   ├── usePublishCourse.ts
+│   │       │   └── useAiGenerate.ts
+│   │       └── components/
+│   │           ├── AiPalette.tsx
+│   │           ├── canvas/
+│   │           │   ├── CanvasAdapter.tsx  # ⬅ custom drag, NOT flow-canvas
+│   │           │   └── renderers/
+│   │           │       ├── TextNodeRenderer.tsx
+│   │           │       ├── ImageNodeRenderer.tsx
+│   │           │       └── QuizNodeRenderer.tsx
+│   │           ├── inspector/
+│   │           │   ├── InspectorPanel.tsx
+│   │           │   ├── TextInspector.tsx
+│   │           │   ├── ImageInspector.tsx
+│   │           │   ├── QuizInspector.tsx
+│   │           │   └── useDebouncedCallback.ts
+│   │           └── navigation/PageTabs.tsx
+│   ├── player/                     # Preact runtime
+│   │   ├── package.json
+│   │   ├── vite.config.ts          # emits bundle.js/css
+│   │   ├── tsconfig.json
+│   │   ├── index.html              # has <!--SCORM_META--> + <!--SCORM_MANIFEST-->
+│   │   └── src/
+│   │       ├── main.tsx
+│   │       ├── App.tsx
+│   │       ├── useScorm.tsx        # ScormProvider + visibility/pagehide hooks
+│   │       └── SlideRenderer.tsx   # absolute positions using width/height
+│   └── worker/                     # Hono + R2 + Workers AI
+│       ├── package.json
+│       ├── wrangler.toml           # [ai] binding + [[rules]] for ?raw
+│       ├── tsconfig.json
+│       ├── vitest.config.ts
+│       └── src/
+│           ├── index.ts            # routes + onError
+│           ├── errors.ts           # PublishError
+│           ├── packager/
+│           │   ├── assets.ts       # content-hash + R2 inline
+│           │   ├── xml.ts          # imsmanifest.xml
+│           │   └── packager.ts     # zipSync
+│           └── ai/
+│               ├── prompts.ts
+│               ├── parse.ts
+│               └── routes.ts
