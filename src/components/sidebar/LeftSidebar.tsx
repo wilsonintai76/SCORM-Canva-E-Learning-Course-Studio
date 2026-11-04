@@ -6,6 +6,10 @@ import { SLIDE_LAYOUTS, SlideLayout } from '../../data/slideLayouts';
 import { AssetsLibrary } from './AssetsLibrary';
 import { TypographyLibrary } from './TypographyLibrary';
 import { TemplatePreviewThumbnail } from './TemplatePreviewThumbnail';
+import { GlobalThemeEditor } from './GlobalThemeEditor';
+import { QuizTemplatesLibrary } from './QuizTemplatesLibrary';
+import { ComponentTemplatesLibrary } from './ComponentTemplatesLibrary';
+import { LayersPanel } from '../inspector/LayersPanel';
 import {
   Type,
   HelpCircle,
@@ -18,10 +22,14 @@ import {
   CheckCircle2,
   LayoutGrid,
   Plus,
+  PlusSquare,
+  Boxes,
   ArrowRight,
   GripVertical,
   Layers,
   FolderArchive,
+  Search,
+  X,
 } from 'lucide-react';
 
 export const LeftSidebar: React.FC = () => {
@@ -35,24 +43,34 @@ export const LeftSidebar: React.FC = () => {
   } = useCourseStore();
 
   const [activePanel, setActivePanel] = useState<
-    'layouts' | 'assets' | 'typography' | 'elements' | 'courses'
+    'layouts' | 'components' | 'elements' | 'layers' | 'assets' | 'typography' | 'quiz' | 'theme' | 'courses'
   >('layouts');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [templateSearchQuery, setTemplateSearchQuery] = useState('');
   const [hoveredLayoutId, setHoveredLayoutId] = useState<string | null>(null);
 
   const filteredLayouts = SLIDE_LAYOUTS.filter((layout) => {
-    if (selectedCategory === 'all') return true;
-    return layout.category === selectedCategory;
+    if (selectedCategory !== 'all' && layout.category !== selectedCategory) return false;
+    if (templateSearchQuery.trim()) {
+      const q = templateSearchQuery.toLowerCase();
+      const matchTitle = layout.title.toLowerCase().includes(q);
+      const matchDesc = layout.description.toLowerCase().includes(q);
+      const matchCat = layout.category.toLowerCase().includes(q);
+      const matchBadge = layout.badge?.toLowerCase().includes(q);
+      const matchTags = layout.tags?.some((t) => t.toLowerCase().includes(q));
+      return matchTitle || matchDesc || matchCat || matchBadge || matchTags;
+    }
+    return true;
   });
 
   return (
     <aside className="w-80 bg-slate-900 border-r border-slate-800 flex flex-col h-full shrink-0 select-none">
-      {/* Top 5 Section Tabs */}
-      <div className="flex border-b border-slate-800 bg-slate-950/60 p-1 gap-0.5">
+      {/* Top Section Tabs */}
+      <div className="grid grid-cols-4 sm:grid-cols-8 border-b border-slate-800 bg-slate-950/60 p-1 gap-0.5">
         <button
           onClick={() => setActivePanel('layouts')}
           title="Slide Layouts Library"
-          className={`flex-1 py-1.5 text-[11px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
             activePanel === 'layouts'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
@@ -61,10 +79,49 @@ export const LeftSidebar: React.FC = () => {
           <LayoutGrid className="w-3.5 h-3.5" />
           <span>Layouts</span>
         </button>
+
+        <button
+          onClick={() => setActivePanel('components')}
+          title="Pre-Designed E-Learning Component Templates (Knowledge Check, Click-to-Reveal, Steppers)"
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+            activePanel === 'components'
+              ? 'bg-slate-800 text-white font-semibold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Boxes className="w-3.5 h-3.5 text-sky-400" />
+          <span>Blocks</span>
+        </button>
+
+        <button
+          onClick={() => setActivePanel('elements')}
+          title="Insert Canvas Elements (Text, Media, Quiz, Callout)"
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+            activePanel === 'elements'
+              ? 'bg-slate-800 text-white font-semibold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <PlusSquare className="w-3.5 h-3.5 text-blue-400" />
+          <span>Elements</span>
+        </button>
+
+        <button
+          onClick={() => setActivePanel('layers')}
+          title="Slide Layer Stack List View, Reordering, Grouping, Locking & Hiding"
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+            activePanel === 'layers'
+              ? 'bg-slate-800 text-white font-semibold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Layers</span>
+        </button>
         <button
           onClick={() => setActivePanel('assets')}
           title="Assets & Shared Graphics Library"
-          className={`flex-1 py-1.5 text-[11px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
             activePanel === 'assets'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
@@ -76,47 +133,69 @@ export const LeftSidebar: React.FC = () => {
         <button
           onClick={() => setActivePanel('typography')}
           title="Typography & Text Box Styles"
-          className={`flex-1 py-1.5 text-[11px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
             activePanel === 'typography'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Type className="w-3.5 h-3.5 text-sky-400" />
+          <Type className="w-3.5 h-3.5 text-indigo-400" />
           <span>Text</span>
         </button>
         <button
-          onClick={() => setActivePanel('elements')}
-          title="Individual Elements"
-          className={`flex-1 py-1.5 text-[11px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
-            activePanel === 'elements'
+          onClick={() => setActivePanel('quiz')}
+          title="Quiz Templates (True/False, Multiple Choice, Matching)"
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+            activePanel === 'quiz'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Palette className="w-3.5 h-3.5 text-amber-400" />
-          <span>Shapes</span>
+          <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+          <span>Quiz</span>
+        </button>
+        <button
+          onClick={() => setActivePanel('theme')}
+          title="Global Theme Editor (Colors, Fonts, Logo)"
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+            activePanel === 'theme'
+              ? 'bg-slate-800 text-white font-semibold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Palette className="w-3.5 h-3.5 text-pink-400" />
+          <span>Theme</span>
         </button>
         <button
           onClick={() => setActivePanel('courses')}
           title="Full Sample Courses"
-          className={`flex-1 py-1.5 text-[11px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
             activePanel === 'courses'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <BookOpen className="w-3.5 h-3.5" />
+          <BookOpen className="w-3.5 h-3.5 text-purple-400" />
           <span>Courses</span>
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+        {/* ================= E-LEARNING COMPONENT TEMPLATES ================= */}
+        {activePanel === 'components' && <ComponentTemplatesLibrary />}
+
         {/* ================= ASSETS LIBRARY ================= */}
         {activePanel === 'assets' && <AssetsLibrary />}
 
         {/* ================= TYPOGRAPHY LIBRARY ================= */}
         {activePanel === 'typography' && <TypographyLibrary />}
+
+        {/* ================= QUIZ TEMPLATES LIBRARY ================= */}
+        {activePanel === 'quiz' && <QuizTemplatesLibrary />}
+
+        {/* ================= GLOBAL THEME EDITOR ================= */}
+        {activePanel === 'theme' && <GlobalThemeEditor />}
+
         {/* ================= LAYOUTS LIBRARY ================= */}
         {activePanel === 'layouts' && (
           <div className="space-y-3.5">
@@ -128,6 +207,26 @@ export const LeftSidebar: React.FC = () => {
               <p className="text-[11px] text-slate-400 leading-tight mb-2.5">
                 Drag any pre-designed slide layout directly onto the active canvas or click to apply.
               </p>
+
+              {/* Search filter input */}
+              <div className="relative mb-2.5">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={templateSearchQuery}
+                  onChange={(e) => setTemplateSearchQuery(e.target.value)}
+                  placeholder="Filter templates by name or category..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-7 py-1.5 text-slate-200 text-xs placeholder:text-slate-500 outline-none focus:border-blue-500"
+                />
+                {templateSearchQuery && (
+                  <button
+                    onClick={() => setTemplateSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
               {/* Category Filter Pills */}
               <div className="flex flex-wrap gap-1">
@@ -247,6 +346,11 @@ export const LeftSidebar: React.FC = () => {
                   </div>
                 </div>
               ))}
+              {filteredLayouts.length === 0 && (
+                <div className="text-center py-8 text-slate-500 text-xs">
+                  No slide templates found matching "{templateSearchQuery}"
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -376,6 +480,9 @@ export const LeftSidebar: React.FC = () => {
             </div>
           </>
         )}
+
+        {/* ================= LAYERS TAB ================= */}
+        {activePanel === 'layers' && <LayersPanel />}
 
         {/* ================= COURSES TAB ================= */}
         {activePanel === 'courses' && (

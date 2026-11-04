@@ -61,7 +61,9 @@ export const AssetsLibrary: React.FC = () => {
       const q = searchQuery.toLowerCase();
       const matchName = asset.name.toLowerCase().includes(q);
       const matchTag = asset.tags.some((t) => t.toLowerCase().includes(q));
-      return matchName || matchTag;
+      const matchCategory = asset.category.toLowerCase().includes(q);
+      const matchType = asset.type.toLowerCase().includes(q);
+      return matchName || matchTag || matchCategory || matchType;
     }
     return true;
   });
@@ -189,9 +191,18 @@ export const AssetsLibrary: React.FC = () => {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search icons, shapes, images..."
-          className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+          placeholder="Search assets by name or tags..."
+          className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
         />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            title="Clear search"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-0.5"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Category Pills */}

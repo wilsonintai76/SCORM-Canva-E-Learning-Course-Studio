@@ -20,6 +20,7 @@ export interface ScormBundleFileEntry {
   path: string;
   size: number;
   type: string;
+  content?: string;
 }
 
 export interface ScormBundlePackageResult {
@@ -107,6 +108,7 @@ export async function bundleCourseToScormZip(
     path: 'imsmanifest.xml',
     size: new Blob([imsXml]).size,
     type: 'text/xml',
+    content: imsXml,
   });
 
   // 2. index.html (Self-contained HTML5 Player runtime)
@@ -116,6 +118,7 @@ export async function bundleCourseToScormZip(
     path: 'index.html',
     size: new Blob([playerHtml]).size,
     type: 'text/html',
+    content: playerHtml,
   });
 
   // 3. course_data.json (Clean structured course manifest JSON)
@@ -125,6 +128,7 @@ export async function bundleCourseToScormZip(
     path: 'course_data.json',
     size: new Blob([courseJson]).size,
     type: 'application/json',
+    content: courseJson,
   });
 
   // 4. SCORM 1.2 schema definition references
@@ -134,6 +138,7 @@ export async function bundleCourseToScormZip(
     path: 'imscp_rootv1p1p2.xsd',
     size: new Blob([imscpRootXsd]).size,
     type: 'text/xml',
+    content: imscpRootXsd,
   });
 
   const adlcpXsd = `<?xml version="1.0" encoding="UTF-8"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="http://www.adlnet.org/xsd/adlcp_rootv1p2" elementFormDefault="qualified"></xs:schema>`;
@@ -142,6 +147,7 @@ export async function bundleCourseToScormZip(
     path: 'adlcp_rootv1p2.xsd',
     size: new Blob([adlcpXsd]).size,
     type: 'text/xml',
+    content: adlcpXsd,
   });
 
   const totalRawSize = fileEntries.reduce((acc, f) => acc + f.size, 0);

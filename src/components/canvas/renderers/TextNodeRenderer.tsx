@@ -12,6 +12,7 @@ export const TextNodeRenderer: React.FC<Props> = ({ node, isSelected, onUpdateCo
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (node.isLocked) return;
     setIsEditing(true);
   };
 

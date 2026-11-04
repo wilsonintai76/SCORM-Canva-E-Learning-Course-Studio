@@ -1,6 +1,33 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useCourseStore } from '../../store/courseStore';
-import { Plus, Copy, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Plus,
+  Copy,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Palette,
+  Check,
+  MoreVertical,
+  CheckSquare,
+  Square,
+} from 'lucide-react';
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  targetIndex: number;
+  selectedIndices: number[];
+}
+
+const BG_PRESETS = [
+  { label: 'White', color: '#ffffff' },
+  { label: 'Off-White', color: '#f8fafc' },
+  { label: 'Slate Dark', color: '#0f172a' },
+  { label: 'Navy Deep', color: '#172554' },
+  { label: 'Emerald Deep', color: '#064e3b' },
+  { label: 'Charcoal', color: '#18181b' },
+];
 
 export const PageTabs: React.FC = () => {
   const {
@@ -11,32 +38,142 @@ export const PageTabs: React.FC = () => {
     duplicatePage,
     deletePage,
     reorderPages,
+    changeSlideBackground,
+    duplicateMultiplePages,
+    deleteMultiplePages,
   } = useCourseStore();
 
+  const [selectedIndices, setSelectedIndices] = useState<number[]>([activePageIndex]);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [isChangingBg, setIsChangingBg] = useState(false);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Sync selectedIndices with activePageIndex if single-select
+  useEffect(() => {
+    if (!selectedIndices.includes(activePageIndex)) {
+      setSelectedIndices([activePageIndex]);
+    }
+  }, [activePageIndex]);
+
+  // Click outside to dismiss context menu
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+        setIsChangingBg(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setContextMenu(null);
+        setIsChangingBg(false);
+      }
+    };
+
+    window.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const handleSlideClick = (index: number, e: React.MouseEvent) => {
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      setSelectedIndices((prev) =>
+        prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
+      );
+    } else {
+      setSelectedIndices([index]);
+      setActivePage(index);
+    }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const targetIndices = selectedIndices.includes(index) ? selectedIndices : [index];
+    if (!selectedIndices.includes(index)) {
+      setSelectedIndices([index]);
+    }
+
+    // Keep context menu on screen
+    const menuWidth = 200;
+    const menuHeight = 260;
+    const clickX = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
+    const clickY = Math.min(e.clientY - menuHeight + 40, window.innerHeight - menuHeight - 10);
+
+    setContextMenu({
+      x: clickX,
+      y: Math.max(10, clickY),
+      targetIndex: index,
+      selectedIndices: targetIndices,
+    });
+    setIsChangingBg(false);
+  };
+
+  const handleDuplicateAction = () => {
+    if (!contextMenu) return;
+    if (contextMenu.selectedIndices.length === 1) {
+      duplicatePage(contextMenu.selectedIndices[0]);
+    } else {
+      duplicateMultiplePages(contextMenu.selectedIndices);
+    }
+    setContextMenu(null);
+  };
+
+  const handleDeleteAction = () => {
+    if (!contextMenu) return;
+    if (contextMenu.selectedIndices.length === 1) {
+      deletePage(contextMenu.selectedIndices[0]);
+    } else {
+      deleteMultiplePages(contextMenu.selectedIndices);
+    }
+    setContextMenu(null);
+  };
+
+  const handleApplyBackground = (color: string) => {
+    if (!contextMenu) return;
+    changeSlideBackground(contextMenu.selectedIndices, color);
+    setContextMenu(null);
+    setIsChangingBg(false);
+  };
+
   return (
-    <footer className="h-24 bg-slate-900 border-t border-slate-800 flex items-center px-4 gap-3 shrink-0 select-none overflow-x-auto">
+    <footer className="h-24 bg-slate-900 border-t border-slate-800 flex items-center px-4 gap-3 shrink-0 select-none overflow-x-auto relative">
       <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium shrink-0">
         <span>Slides ({course.pages.length}):</span>
+        {selectedIndices.length > 1 && (
+          <span className="text-[10px] text-blue-400 font-mono bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800">
+            {selectedIndices.length} selected
+          </span>
+        )}
       </div>
 
       {/* Slide Thumbnails Filmstrip */}
       <div className="flex items-center gap-3 overflow-x-auto py-2 flex-1">
         {course.pages.map((page, index) => {
           const isActive = index === activePageIndex;
+          const isSelected = selectedIndices.includes(index);
 
           return (
             <div
               key={page.id}
               className={`group relative flex flex-col items-center shrink-0 cursor-pointer transition-all ${
-                isActive ? 'scale-105' : 'opacity-70 hover:opacity-100'
+                isActive ? 'scale-105' : 'opacity-75 hover:opacity-100'
               }`}
-              onClick={() => setActivePage(index)}
+              onClick={(e) => handleSlideClick(index, e)}
+              onContextMenu={(e) => handleContextMenu(e, index)}
             >
               {/* Thumbnail Frame */}
               <div
                 className={`w-28 h-16 rounded border transition-all overflow-hidden relative shadow-sm flex flex-col justify-between p-1.5 ${
                   isActive
                     ? 'border-blue-500 ring-2 ring-blue-500/40 shadow-blue-500/20'
+                    : isSelected
+                    ? 'border-sky-400 ring-1 ring-sky-400/50'
                     : 'border-slate-700 bg-slate-800'
                 }`}
                 style={{
@@ -126,6 +263,93 @@ export const PageTabs: React.FC = () => {
           <span className="text-[11px] font-medium">Add Slide</span>
         </button>
       </div>
+
+      {/* Right-Click Context Menu */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 z-[100] w-56 text-xs text-slate-200 select-none animate-in fade-in duration-100"
+          style={{
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-2.5 py-1.5 border-b border-slate-800 text-[11px] text-slate-400 font-semibold flex items-center justify-between">
+            <span>
+              {contextMenu.selectedIndices.length > 1
+                ? `${contextMenu.selectedIndices.length} Slides Selected`
+                : `Slide #${contextMenu.targetIndex + 1}`}
+            </span>
+          </div>
+
+          <div className="py-1 space-y-0.5">
+            <button
+              onClick={handleDuplicateAction}
+              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white flex items-center gap-2 transition-colors cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5 text-blue-400" />
+              <span>
+                {contextMenu.selectedIndices.length > 1
+                  ? `Duplicate ${contextMenu.selectedIndices.length} Slides`
+                  : 'Duplicate Slide'}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setIsChangingBg(!isChangingBg)}
+              className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white flex items-center justify-between transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Palette className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Change Background</span>
+              </div>
+              <ChevronRight className="w-3 h-3 text-slate-500" />
+            </button>
+
+            {/* Background color options expansion */}
+            {isChangingBg && (
+              <div className="p-2 bg-slate-950 rounded-lg border border-slate-800 my-1 space-y-2">
+                <span className="text-[10px] text-slate-400 font-medium block">Select Color:</span>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {BG_PRESETS.map((p) => (
+                    <button
+                      key={p.color}
+                      onClick={() => handleApplyBackground(p.color)}
+                      title={p.label}
+                      className="w-6 h-6 rounded-md border border-slate-700 hover:scale-110 transition-transform cursor-pointer"
+                      style={{ background: p.color }}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5 pt-1">
+                  <input
+                    type="color"
+                    onChange={(e) => handleApplyBackground(e.target.value)}
+                    className="w-6 h-6 rounded border border-slate-700 cursor-pointer bg-transparent"
+                    title="Custom color picker"
+                  />
+                  <span className="text-[10px] text-slate-400">Custom hex color</span>
+                </div>
+              </div>
+            )}
+
+            {course.pages.length > contextMenu.selectedIndices.length && (
+              <button
+                onClick={handleDeleteAction}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-red-950/80 text-red-400 hover:text-red-300 flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>
+                  {contextMenu.selectedIndices.length > 1
+                    ? `Delete ${contextMenu.selectedIndices.length} Slides`
+                    : 'Delete Slide'}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </footer>
   );
 };

@@ -11,6 +11,8 @@ import {
   AlertCircle,
   HelpCircle,
   CircleDot,
+  CheckSquare,
+  Square,
   Terminal,
   Trophy,
 } from 'lucide-react';
@@ -101,9 +103,36 @@ export const ScormPlayerModal: React.FC = () => {
     return { earned, totalPossible, pct };
   };
 
-  const handleSelectQuizOption = (nodeId: string, optionId: string, isCorrect: boolean, points: number) => {
-    const nextAnswers = { ...quizAnswers, [nodeId]: [optionId] };
-    const nextScores = { ...quizScores, [nodeId]: isCorrect ? points : 0 };
+  const handleSelectQuizOption = (quiz: QuizNode, optionId: string) => {
+    const isMulti = quiz.quizType === 'multiple';
+    let currentSelected = quizAnswers[quiz.id] || [];
+
+    if (isMulti) {
+      if (currentSelected.includes(optionId)) {
+        currentSelected = currentSelected.filter((id) => id !== optionId);
+      } else {
+        currentSelected = [...currentSelected, optionId];
+      }
+    } else {
+      currentSelected = [optionId];
+    }
+
+    const nextAnswers = { ...quizAnswers, [quiz.id]: currentSelected };
+
+    // Determine correctness
+    const correctIds = (quiz.options || []).filter((o) => o.isCorrect).map((o) => o.id);
+    let isFullyCorrect = false;
+
+    if (isMulti) {
+      const hasAllCorrect = correctIds.every((id) => currentSelected.includes(id));
+      const hasNoIncorrect = currentSelected.every((id) => correctIds.includes(id));
+      isFullyCorrect = hasAllCorrect && hasNoIncorrect && correctIds.length > 0;
+    } else {
+      isFullyCorrect = correctIds.includes(currentSelected[0]);
+    }
+
+    const points = quiz.points || 10;
+    const nextScores = { ...quizScores, [quiz.id]: isFullyCorrect ? points : 0 };
     setQuizAnswers(nextAnswers);
     setQuizScores(nextScores);
 
@@ -132,7 +161,9 @@ export const ScormPlayerModal: React.FC = () => {
 
       setConsoleLogs((prev) => [
         `[LMS] LMSSetValue('cmi.core.score.raw', '${pct}') -> true`,
-        `[LMS] Quiz answered for #${nodeId.slice(-5)} (Score: ${pct}%)`,
+        `[LMS] Quiz answered for #${quiz.id.slice(-5)} (Score: ${pct}%, Result: ${
+          isFullyCorrect ? 'Correct' : 'Incorrect'
+        })`,
         ...prev.slice(0, 30),
       ]);
     }
@@ -442,25 +473,30 @@ export const ScormPlayerModal: React.FC = () => {
                           return (
                             <button
                               key={opt.id}
-                              onClick={() =>
-                                handleSelectQuizOption(
-                                  quiz.id,
-                                  opt.id,
-                                  Boolean(opt.isCorrect),
-                                  quiz.points || 10
-                                )
-                              }
+                              onClick={() => handleSelectQuizOption(quiz, opt.id)}
                               className={`w-full text-left p-3 rounded-lg border text-xs flex items-center gap-3 transition-all cursor-pointer ${buttonStyle}`}
                             >
-                              <CircleDot
-                                className={`w-4 h-4 shrink-0 ${
-                                  isSelected
-                                    ? opt.isCorrect
-                                      ? 'text-emerald-600'
-                                      : 'text-red-600'
-                                    : 'text-slate-400'
-                                }`}
-                              />
+                              {quiz.quizType === 'multiple' ? (
+                                isSelected ? (
+                                  <CheckSquare
+                                    className={`w-4 h-4 shrink-0 ${
+                                      opt.isCorrect ? 'text-emerald-600' : 'text-red-600'
+                                    }`}
+                                  />
+                                ) : (
+                                  <Square className="w-4 h-4 shrink-0 text-slate-400" />
+                                )
+                              ) : (
+                                <CircleDot
+                                  className={`w-4 h-4 shrink-0 ${
+                                    isSelected
+                                      ? opt.isCorrect
+                                        ? 'text-emerald-600'
+                                        : 'text-red-600'
+                                      : 'text-slate-400'
+                                  }`}
+                                />
+                              )}
                               <span className="flex-1 leading-normal">{opt.text}</span>
                               {isSelected && opt.isCorrect && (
                                 <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">

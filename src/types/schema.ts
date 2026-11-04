@@ -15,6 +15,13 @@ export interface BaseNode {
   rotation?: number;
   groupId?: string;
   isLocked?: boolean;
+  isHidden?: boolean;
+  name?: string;
+  animation?: {
+    enter: 'none' | 'fade' | 'slide-up' | 'slide-left' | 'zoom' | 'bounce';
+    exit?: 'none' | 'fade' | 'slide-down' | 'zoom';
+    duration?: number;
+  };
 }
 
 export interface TextNode extends BaseNode {
@@ -52,15 +59,24 @@ export interface QuizOption {
   feedback?: string;
 }
 
+export interface QuizLogicConfig {
+  onPass?: 'next_slide' | 'result_screen' | 'specific_slide';
+  onFail?: 'retry' | 'review' | 'next_slide';
+  targetSlideId?: string;
+  correctFeedback?: string;
+  incorrectFeedback?: string;
+}
+
 export interface QuizNode extends BaseNode {
   type: 'quiz';
-  quizType: 'single' | 'multiple' | 'true-false';
+  quizType: 'single' | 'multiple' | 'true-false' | 'matching';
   question: string;
   options: QuizOption[];
   explanation?: string;
   points: number;
   showFeedbackImmediately: boolean;
   themeColor?: string;
+  quizLogic?: QuizLogicConfig;
 }
 
 export interface ShapeNode extends BaseNode {
@@ -88,6 +104,14 @@ export interface PageTransition {
   duration: number;
 }
 
+export interface AudioNarration {
+  audioUrl?: string;
+  name?: string;
+  duration?: number;
+  autoPlay?: boolean;
+  waveform?: number[];
+}
+
 export interface Page {
   id: string;
   title: string;
@@ -99,6 +123,7 @@ export interface Page {
   };
   nodes: CanvasNode[];
   transition?: PageTransition;
+  audioNarration?: AudioNarration;
   notes?: string;
 }
 
@@ -149,6 +174,26 @@ export interface AssetItem {
   isCustom?: boolean;
 }
 
+export interface GlobalTheme {
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  backgroundColor: string;
+  fontFamily: string;
+  headingFontFamily?: string;
+  bodyFontFamily?: string;
+  logoUrl?: string;
+  logoPosition?: 'top-left' | 'top-right' | 'bottom-right';
+}
+
+export interface BranchingConnection {
+  id: string;
+  fromPageId: string;
+  toPageId: string;
+  label?: string;
+  condition?: 'default' | 'passed' | 'failed' | 'choice';
+}
+
 export interface CourseManifest {
   id: string;
   title: string;
@@ -165,6 +210,8 @@ export interface CourseManifest {
   updatedAt: string;
   variables?: CourseVariable[];
   comments?: CanvasComment[];
+  theme?: GlobalTheme;
+  branching?: BranchingConnection[];
 }
 
 export interface SuspendPayload {

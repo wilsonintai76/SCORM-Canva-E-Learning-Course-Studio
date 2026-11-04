@@ -13,6 +13,7 @@ export interface SlideLayout {
   title: string;
   description: string;
   badge?: string;
+  tags?: string[];
   background: {
     type: 'color' | 'gradient';
     value: string;
@@ -28,6 +29,7 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     title: 'Hero Intro & Objective',
     description: 'Impactful title, course badge, learning objective callout, and side hero imagery.',
     badge: 'Standard Intro',
+    tags: ['intro', 'hero', 'header', 'objective', 'cover', 'welcome', 'title'],
     background: {
       type: 'gradient',
       value: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)',
@@ -119,6 +121,7 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     title: '3-Pillar Framework',
     description: 'Header with 3 balanced concept cards: Info, Warning, and Actionable Pro-Tips.',
     badge: 'Popular',
+    tags: ['content', 'pillars', '3-pillar', 'framework', 'cards', 'callout', 'info', 'warning', 'tip'],
     background: {
       type: 'color',
       value: '#f8fafc',
@@ -193,6 +196,7 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     title: 'Split Content & Diagram',
     description: 'Two-column layout balancing structured instructional text with featured visual media.',
     badge: 'Content',
+    tags: ['content', 'split', 'diagram', 'media', 'two-column', 'image', 'workflow'],
     background: {
       type: 'color',
       value: '#ffffff',
@@ -259,6 +263,7 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     title: 'Knowledge Check Quiz',
     description: 'SCORM graded interactive multiple-choice evaluation with instant learner feedback.',
     badge: 'SCORM Graded',
+    tags: ['quiz', 'graded', 'scorm', 'assessment', 'knowledge check', 'multiple choice', 'single', 'evaluation'],
     background: {
       type: 'color',
       value: '#f1f5f9',
@@ -306,6 +311,7 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     title: 'LMS Completion & Summary',
     description: 'Celebratory completion badge, key takeaways recap, and SCORM status confirmation.',
     badge: 'Completion',
+    tags: ['conclusion', 'summary', 'completion', 'lms', 'scorm', 'certificate', 'pass', 'telemetry'],
     background: {
       type: 'gradient',
       value: 'linear-gradient(135deg, #064e3b 0%, #0f172a 100%)',

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { generateColorHarmonies, calculateContrastRatio } from '../../utils/colorPaletteGenerator';
+import { generateColorHarmonies } from '../../utils/colorPaletteGenerator';
 import { Palette, Sparkles, Copy, Check } from 'lucide-react';
 
 interface ColorPaletteGeneratorProps {

@@ -513,21 +513,44 @@ export function generateStandalonePlayerHtml(manifest: CourseManifest): string {
               }
 
               btn.addEventListener("click", function() {
-                quizAnswers[node.id] = [opt.id];
-                var isRight = Boolean(opt.isCorrect);
+                var isMulti = node.quizType === "multiple";
+                var cur = quizAnswers[node.id] || [];
+                if (isMulti) {
+                  if (cur.includes(opt.id)) {
+                    cur = cur.filter(function(x) { return x !== opt.id; });
+                  } else {
+                    cur.push(opt.id);
+                  }
+                } else {
+                  cur = [opt.id];
+                }
+                quizAnswers[node.id] = cur;
+
+                var correctOpts = (node.options || []).filter(function(o) { return o.isCorrect; }).map(function(o) { return o.id; });
+                var isRight = false;
+                if (isMulti) {
+                  var allCorrect = correctOpts.every(function(id) { return cur.includes(id); });
+                  var noIncorrect = cur.every(function(id) { return correctOpts.includes(id); });
+                  isRight = allCorrect && noIncorrect && correctOpts.length > 0;
+                } else {
+                  isRight = Boolean(opt.isCorrect);
+                }
                 quizScores[node.id] = isRight ? (node.points || 10) : 0;
 
-                optContainer.querySelectorAll(".quiz-option-btn").forEach(function(b) {
-                  b.className = "quiz-option-btn";
+                optContainer.querySelectorAll(".quiz-option-btn").forEach(function(b, idx) {
+                  var optItem = (node.options || [])[idx];
+                  if (optItem && cur.includes(optItem.id)) {
+                    b.className = "quiz-option-btn selected " + (optItem.isCorrect ? "correct" : "incorrect");
+                  } else {
+                    b.className = "quiz-option-btn";
+                  }
                 });
-                btn.classList.add("selected");
+
                 if (isRight) {
-                  btn.classList.add("correct");
-                  feedbackEl.textContent = opt.feedback || "Correct! Well done.";
+                  feedbackEl.textContent = opt.feedback || (node.quizLogic && node.quizLogic.correctFeedback) || "Correct! Well done.";
                   feedbackEl.className = "quiz-feedback show-correct";
                 } else {
-                  btn.classList.add("incorrect");
-                  feedbackEl.textContent = opt.feedback || "Incorrect. Review the slide and try again.";
+                  feedbackEl.textContent = opt.feedback || (node.quizLogic && node.quizLogic.incorrectFeedback) || "Incorrect. Review the slide and try again.";
                   feedbackEl.className = "quiz-feedback show-incorrect";
                 }
                 updateScormState();

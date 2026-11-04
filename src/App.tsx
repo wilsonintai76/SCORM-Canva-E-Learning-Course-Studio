@@ -14,6 +14,13 @@ import { LmsDebuggerDrawer } from './components/lms/LmsDebuggerDrawer';
 import { AiPalette } from './components/ai/AiPalette';
 import { ScormExportModal } from './components/export/ScormExportModal';
 import { ShortcutsModal } from './components/navigation/ShortcutsModal';
+import { AccessibilityModal } from './components/accessibility/AccessibilityModal';
+import { VersionHistoryDrawer } from './components/versioning/VersionHistoryDrawer';
+import { CollaborateModal } from './components/modals/CollaborateModal';
+import { GridSettingsModal } from './components/modals/GridSettingsModal';
+import { MediaManagerModal } from './components/modals/MediaManagerModal';
+import { BranchingFlowModal } from './components/modals/BranchingFlowModal';
+import { PdfHandoutModal } from './components/modals/PdfHandoutModal';
 
 export default function App() {
   return (
@@ -37,6 +44,13 @@ export default function App() {
       <AiPalette />
       <ScormExportModal />
       <ShortcutsModal />
+      <AccessibilityModal />
+      <VersionHistoryDrawer />
+      <CollaborateModal />
+      <GridSettingsModal />
+      <MediaManagerModal />
+      <BranchingFlowModal />
+      <PdfHandoutModal />
     </div>
   );
 }
