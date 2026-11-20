@@ -238,7 +238,7 @@ export const LayersPanel: React.FC = () => {
       </div>
 
       {/* Layer List Items Container */}
-      <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
+      <div className="space-y-1 max-h-120 overflow-y-auto pr-1">
         {filteredNodes.length === 0 ? (
           <div className="py-8 text-center text-slate-500 text-[11px]">
             {searchTerm ? 'No layers match search' : 'No elements on slide'}

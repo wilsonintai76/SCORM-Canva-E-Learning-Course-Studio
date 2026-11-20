@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import html2canvas from 'html2canvas';
 import { useCourseStore } from '../../store/courseStore';
-import { triggerDownloadBlob } from '../../packager/zipPackager';
+import { saveDataUrlWithDialog, saveTextWithDialog } from '../../utils/saveFile';
+import { createBlankCourse } from '../../data/blankCourse';
 import { filterQuickActions, QuickActionItem } from '../../utils/quickActions';
 import {
   Undo,
@@ -16,11 +17,11 @@ import {
   Grid,
   Keyboard,
   FileImage,
-  Users,
   FileText,
   Ruler,
   Sliders,
   History,
+  FilePlus2,
   ShieldCheck,
   GitBranch,
   FolderDown,
@@ -91,7 +92,6 @@ export const TopNavBar: React.FC = () => {
     setIsDebuggerOpen,
     setIsExportModalOpen,
     setIsShortcutsModalOpen,
-    setIsCollaborateModalOpen,
     setIsGridSettingsModalOpen,
     setIsMediaManagerOpen,
     setIsBranchingFlowOpen,
@@ -100,6 +100,8 @@ export const TopNavBar: React.FC = () => {
     setIsPdfModalOpen,
     setIsAiPaletteOpen,
     exportProjectJson,
+    startNewCourse,
+    saveVersion,
   } = useCourseStore();
 
   const { themeMode, setThemeMode } = useTheme();
@@ -182,15 +184,25 @@ export const TopNavBar: React.FC = () => {
     };
   }, []);
 
-  const handleDownloadProject = () => {
+  const handleNewCourse = () => {
+    const confirmed =
+      typeof window.confirm === 'function'
+        ? window.confirm(
+            'Start a new blank course?\n\nThe current course is saved as a version snapshot first, so you can restore it from Version History.'
+          )
+        : true;
+    if (!confirmed) return;
+    startNewCourse(createBlankCourse());
+  };
+
+  const handleDownloadProject = async () => {
     try {
-      const jsonStr = exportProjectJson();
-      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      const jsonStr = await exportProjectJson();
       const safeTitle = (course.title || 'course')
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '');
-      triggerDownloadBlob(blob, `${safeTitle || 'project'}_backup.json`);
+      await saveTextWithDialog(jsonStr, `${safeTitle || 'project'}_backup.json`);
     } catch (err) {
       console.error('Failed to export project JSON:', err);
     }
@@ -216,14 +228,11 @@ export const TopNavBar: React.FC = () => {
       });
 
       const dataUrl = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
       const safeTitle = (currentPage?.title || course.title)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '');
-      link.download = `${safeTitle || 'slide'}_design.png`;
-      link.href = dataUrl;
-      link.click();
+      await saveDataUrlWithDialog(dataUrl, `${safeTitle || 'slide'}_design.png`);
     } catch (err) {
       console.error('Failed to export slide as PNG image:', err);
     } finally {
@@ -323,15 +332,6 @@ export const TopNavBar: React.FC = () => {
         keywords: ['preview', 'play', 'simulate', 'player', 'test'],
         icon: <Play className="w-3.5 h-3.5 text-sky-400" />,
         execute: () => setIsPreviewOpen(true),
-      },
-      {
-        id: 'cmd_collaborate',
-        category: 'Commands',
-        title: 'Share & Collaborate',
-        subtitle: 'Generate review link & team collaboration options',
-        keywords: ['share', 'collaborate', 'review', 'link'],
-        icon: <Users className="w-3.5 h-3.5 text-cyan-400" />,
-        execute: () => setIsCollaborateModalOpen(true),
       },
       {
         id: 'cmd_add_slide',
@@ -570,7 +570,7 @@ export const TopNavBar: React.FC = () => {
       {/* 1. LEFT: Brand, Editable Title, Save State & Quick Actions Search Bar */}
       <div className="flex items-center gap-2 shrink-0 min-w-0">
         <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-linear-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
             <Layers className="w-4 h-4" />
           </div>
           <div className="hidden sm:block">
@@ -583,14 +583,14 @@ export const TopNavBar: React.FC = () => {
           </div>
         </div>
 
-        <div className="hidden sm:block h-4 w-[1px] bg-slate-800 mx-0.5 shrink-0" />
+        <div className="hidden sm:block h-4 w-px bg-slate-800 mx-0.5 shrink-0" />
 
         {/* Course Title editable input */}
         <input
           type="text"
           value={course.title}
           onChange={(e) => updateManifest({ title: e.target.value })}
-          className="text-xs font-medium text-slate-300 hover:text-white bg-transparent hover:bg-slate-800/80 px-2 py-1 rounded transition-colors border border-transparent focus:border-blue-500 focus:bg-slate-950 outline-none max-w-[110px] md:max-w-[155px] lg:max-w-[180px] truncate"
+          className="text-xs font-medium text-slate-300 hover:text-white bg-transparent hover:bg-slate-800/80 px-2 py-1 rounded transition-colors border border-transparent focus:border-blue-500 focus:bg-slate-950 outline-none max-w-27.5 md:max-w-38.75 lg:max-w-45 truncate"
           title="Click to rename course"
         />
 
@@ -808,7 +808,7 @@ export const TopNavBar: React.FC = () => {
           )}
         </button>
 
-        <div className="h-3.5 w-[1px] bg-slate-800 mx-0.5" />
+        <div className="h-3.5 w-px bg-slate-800 mx-0.5" />
 
         {/* Zoom Controls */}
         <button
@@ -818,7 +818,7 @@ export const TopNavBar: React.FC = () => {
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
-        <span className="text-[11px] font-mono text-slate-400 px-1 min-w-[36px] text-center tabular-nums">
+        <span className="text-[11px] font-mono text-slate-400 px-1 min-w-9 text-center tabular-nums">
           {Math.round(zoom * 100)}%
         </span>
         <button
@@ -829,7 +829,7 @@ export const TopNavBar: React.FC = () => {
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
 
-        <div className="h-3.5 w-[1px] bg-slate-800 mx-0.5" />
+        <div className="h-3.5 w-px bg-slate-800 mx-0.5" />
 
         {/* Quick Snap Toggle */}
         <button
@@ -942,7 +942,7 @@ export const TopNavBar: React.FC = () => {
                 </span>
               </button>
 
-              <div className="h-[1px] bg-slate-800/80 my-1 mx-2" />
+              <div className="h-px bg-slate-800/80 my-1 mx-2" />
 
               <button
                 onClick={() => {
@@ -970,7 +970,7 @@ export const TopNavBar: React.FC = () => {
         </div>
 
         {/* Quick Align Popover or Inline Buttons when elements selected */}
-        <div className="h-3.5 w-[1px] bg-slate-800 mx-0.5" />
+        <div className="h-3.5 w-px bg-slate-800 mx-0.5" />
 
         {selectedNodeIds.length > 0 ? (
           <div className="flex items-center gap-0.5 bg-sky-950/40 border border-sky-500/30 rounded-md px-1 py-0.5">
@@ -998,7 +998,7 @@ export const TopNavBar: React.FC = () => {
             >
               <AlignRight className="w-3.5 h-3.5" />
             </button>
-            <div className="w-[1px] h-3 bg-slate-700 mx-0.5" />
+            <div className="w-px h-3 bg-slate-700 mx-0.5" />
             <button
               onClick={() => alignSelected('top')}
               title="Align Top"
@@ -1020,7 +1020,7 @@ export const TopNavBar: React.FC = () => {
             >
               <AlignEndVertical className="w-3.5 h-3.5" />
             </button>
-            <div className="w-[1px] h-3 bg-slate-700 mx-0.5" />
+            <div className="w-px h-3 bg-slate-700 mx-0.5" />
             <button
               onClick={() => alignSelected('baseline')}
               title="Snap to Baseline"
@@ -1078,8 +1078,8 @@ export const TopNavBar: React.FC = () => {
         )}
       </div>
 
-      {/* 3. RIGHT: Project Actions Dropdown + Visible Collaborate & Export (.zip) */}
-      <div className="flex items-center gap-2 shrink-0">
+      {/* 3. RIGHT: Project Actions + Export (.zip) */}
+      <div className="flex items-center gap-1.5 shrink-0">
         {/* Single Consolidated Project Actions Dropdown */}
         <div className="relative">
           <button
@@ -1092,16 +1092,16 @@ export const TopNavBar: React.FC = () => {
             aria-expanded={isProjectActionsOpen}
             aria-haspopup="menu"
             title="Project Actions, Preview, Audits, Exports & Theme"
-            className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`h-8 px-3 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               isProjectActionsOpen
                 ? 'bg-slate-800 border-slate-600 text-white'
-                : 'bg-slate-800/70 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
+                : 'bg-transparent border-slate-700/70 text-slate-300 hover:bg-slate-800/60 hover:border-slate-600 hover:text-white'
             }`}
           >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span>Project Actions</span>
             <ChevronDown
-              className={`w-3 h-3 text-slate-400 transition-transform ${
+              className={`w-3.5 h-3.5 text-slate-500 shrink-0 transition-transform ${
                 isProjectActionsOpen ? 'rotate-180' : ''
               }`}
             />
@@ -1113,6 +1113,44 @@ export const TopNavBar: React.FC = () => {
               className="absolute top-full right-0 mt-2 w-72 bg-slate-900/98 backdrop-blur-xl border border-slate-700/90 rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 select-none max-h-[82vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Project lifecycle: New / Snapshot */}
+              <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Project
+              </div>
+
+              <button
+                role="menuitem"
+                onClick={() => {
+                  handleNewCourse();
+                  closeAllMenus();
+                }}
+                className="w-full px-3 py-1.5 flex items-center gap-2.5 hover:bg-slate-800/90 hover:text-white text-left transition-colors cursor-pointer text-slate-200"
+              >
+                <FilePlus2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <div className="truncate">
+                  <div className="text-xs font-medium leading-snug">New Course</div>
+                  <div className="text-[10px] text-slate-400">Start a blank SCORM project</div>
+                </div>
+              </button>
+
+              <button
+                role="menuitem"
+                onClick={() => {
+                  saveVersion();
+                  setIsVersionHistoryOpen(true);
+                  closeAllMenus();
+                }}
+                className="w-full px-3 py-1.5 flex items-center gap-2.5 hover:bg-slate-800/90 hover:text-white text-left transition-colors cursor-pointer text-slate-200"
+              >
+                <History className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <div className="truncate">
+                  <div className="text-xs font-medium leading-snug">Save Snapshot</div>
+                  <div className="text-[10px] text-slate-400">Version restore point for this course</div>
+                </div>
+              </button>
+
+              <div className="h-px bg-slate-800/80 my-1 mx-2" />
+
               {/* Primary Secondary Action: Preview */}
               <div className="px-2 pb-1.5 mb-1 border-b border-slate-800/80">
                 <button
@@ -1213,7 +1251,7 @@ export const TopNavBar: React.FC = () => {
                 </div>
               </button>
 
-              <div className="h-[1px] bg-slate-800/80 my-1.5 mx-2" />
+              <div className="h-px bg-slate-800/80 my-1.5 mx-2" />
 
               {/* Additional Exports */}
               <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -1268,7 +1306,7 @@ export const TopNavBar: React.FC = () => {
                 </div>
               </button>
 
-              <div className="h-[1px] bg-slate-800/80 my-1.5 mx-2" />
+              <div className="h-px bg-slate-800/80 my-1.5 mx-2" />
 
               {/* Settings & Help */}
               <button
@@ -1301,7 +1339,7 @@ export const TopNavBar: React.FC = () => {
                 </div>
               </button>
 
-              <div className="h-[1px] bg-slate-800/80 my-1.5 mx-2" />
+              <div className="h-px bg-slate-800/80 my-1.5 mx-2" />
 
               {/* Inline Interface Theme Segmented Selector */}
               <div className="px-3 py-1 space-y-1.5">
@@ -1348,24 +1386,14 @@ export const TopNavBar: React.FC = () => {
           )}
         </div>
 
-        {/* Visible Collaborate Button */}
-        <button
-          onClick={() => setIsCollaborateModalOpen(true)}
-          title="Share read-only review link or collaborate"
-          className="px-2.5 py-1.5 bg-slate-800/70 hover:bg-slate-800 border border-slate-700/80 text-slate-200 hover:text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-        >
-          <Users className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-          <span className="hidden sm:inline">Collaborate</span>
-        </button>
-
         {/* Visible Primary Export (.zip) CTA Button */}
         <button
           onClick={() => setIsExportModalOpen(true)}
           title="Export course into SCORM package (.zip)"
-          className="px-3 md:px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm shadow-blue-600/30 transition-all cursor-pointer whitespace-nowrap shrink-0"
+          className="h-8 px-3.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm shadow-blue-950/40 transition-colors cursor-pointer whitespace-nowrap shrink-0"
         >
           <Download className="w-3.5 h-3.5 text-white shrink-0" />
-          <span>Export (.zip)</span>
+          <span>Export .zip</span>
         </button>
       </div>
     </header>

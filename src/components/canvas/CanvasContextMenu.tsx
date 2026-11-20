@@ -112,7 +112,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
       ref={menuRef}
       role="menu"
       aria-label="Canvas element context menu"
-      className="fixed z-[100] w-[230px] bg-slate-900/98 backdrop-blur-xl border border-slate-700/80 rounded-xl shadow-2xl py-1.5 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-[100] w-57.5 bg-slate-900/98 backdrop-blur-xl border border-slate-700/80 rounded-xl shadow-2xl py-1.5 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100"
       style={{ left: `${clampedX}px`, top: `${clampedY}px` }}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
@@ -184,7 +184,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
         </span>
       </button>
 
-      <div className="h-[1px] bg-slate-800/80 my-1 mx-2" />
+      <div className="h-px bg-slate-800/80 my-1 mx-2" />
 
       {/* Grouping Actions */}
       <button
@@ -225,7 +225,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
         <span className="text-[10px] text-slate-400 font-mono">Ctrl+Shift+G</span>
       </button>
 
-      <div className="h-[1px] bg-slate-800/80 my-1 mx-2" />
+      <div className="h-px bg-slate-800/80 my-1 mx-2" />
 
       {/* Duplicate & Lock */}
       <button
@@ -275,7 +275,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
         </button>
       )}
 
-      <div className="h-[1px] bg-slate-800/80 my-1 mx-2" />
+      <div className="h-px bg-slate-800/80 my-1 mx-2" />
 
       {/* Quick Align Toolbar Row within Menu */}
       <div className="px-3 py-1">
@@ -314,7 +314,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
           >
             <AlignRight className="w-3 h-3" />
           </button>
-          <div className="w-[1px] h-3 bg-slate-800" />
+          <div className="w-px h-3 bg-slate-800" />
           <button
             onClick={() => {
               onAlign('top');
@@ -345,7 +345,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
           >
             <AlignEndVertical className="w-3 h-3" />
           </button>
-          <div className="w-[1px] h-3 bg-slate-800" />
+          <div className="w-px h-3 bg-slate-800" />
           <button
             onClick={() => {
               onAlign('baseline');
@@ -371,7 +371,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
         </div>
       </div>
 
-      <div className="h-[1px] bg-slate-800/80 my-1 mx-2" />
+      <div className="h-px bg-slate-800/80 my-1 mx-2" />
 
       {/* Delete Action */}
       <button

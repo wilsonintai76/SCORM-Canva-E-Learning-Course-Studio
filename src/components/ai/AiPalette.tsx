@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useCourseStore } from '../../store/courseStore';
-import { generateCourseWithAi } from '../../services/aiService';
-import { Sparkles, X, Wand2, HelpCircle, BookOpen, Check } from 'lucide-react';
+import { generateCourseWithAi, AiGenerationResult } from '../../services/aiService';
+import { loadAiSettings, providerInfo } from '../../services/aiSettings';
+import { Sparkles, X, Wand2, HelpCircle, BookOpen, Check, Settings2, TriangleAlert, ArrowLeft } from 'lucide-react';
+import { AiSettingsPanel } from './AiSettingsPanel';
 
 const SUGGESTED_TOPICS = [
   'HIPAA Compliance for Healthcare Workers',
@@ -14,11 +16,14 @@ const SUGGESTED_TOPICS = [
 export const AiPalette: React.FC = () => {
   const { isAiPaletteOpen, setIsAiPaletteOpen, loadCourse, addNode } = useCourseStore();
 
-  const [activeTab, setActiveTab] = useState<'course' | 'quiz'>('course');
+  const [activeTab, setActiveTab] = useState<'course' | 'quiz' | 'settings'>('course');
   const [topic, setTopic] = useState('');
   const [slideCount, setSlideCount] = useState(4);
   const [isGenerating, setIsGenerating] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [notice, setNotice] = useState<{ kind: 'error' | 'info'; message: string } | null>(null);
+
+  const activeProvider = providerInfo(loadAiSettings().provider);
 
   if (!isAiPaletteOpen) return null;
 
@@ -26,17 +31,29 @@ export const AiPalette: React.FC = () => {
     if (!topic.trim()) return;
     setIsGenerating(true);
     setSuccessMsg('');
+    setNotice(null);
 
     try {
-      const generated = await generateCourseWithAi(topic, slideCount);
-      loadCourse(generated);
-      setSuccessMsg('Course successfully generated and loaded into canvas!');
-      setTimeout(() => {
-        setIsAiPaletteOpen(false);
-        setSuccessMsg('');
-      }, 1200);
+      const result: AiGenerationResult = await generateCourseWithAi(topic, slideCount);
+      loadCourse(result.course);
+      if (result.usedFallback) {
+        setNotice({
+          kind: 'error',
+          message: result.error
+            ? `Used the offline template instead of ${activeProvider.label}: ${result.error}`
+            : 'Used the offline template. Configure a provider in AI Settings to generate with a model.',
+        });
+        setSuccessMsg('Offline course template loaded into canvas.');
+      } else {
+        setSuccessMsg(`Generated with ${result.providerLabel} and loaded into canvas!`);
+        setTimeout(() => {
+          setIsAiPaletteOpen(false);
+          setSuccessMsg('');
+        }, 1200);
+      }
     } catch (err) {
       console.error('Course generation failed:', err);
+      setNotice({ kind: 'error', message: 'Course generation failed. Check AI Settings and try again.' });
     } finally {
       setIsGenerating(false);
     }
@@ -53,20 +70,35 @@ export const AiPalette: React.FC = () => {
         {/* Modal Header */}
         <div className="h-14 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-500 to-blue-500 flex items-center justify-center text-white shadow-xs">
+            <div className="w-7 h-7 rounded-lg bg-linear-to-tr from-indigo-500 to-blue-500 flex items-center justify-center text-white shadow-xs">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-100">AI Course &amp; Content Palette</h3>
-              <p className="text-[11px] text-slate-400">Powered by Gemini &amp; Instructional Intelligence</p>
+              <p className="text-[11px] text-slate-400">
+                {activeProvider.label} · {loadAiSettings().model}
+              </p>
             </div>
           </div>
-          <button
-            onClick={() => setIsAiPaletteOpen(false)}
-            className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setActiveTab(activeTab === 'settings' ? 'course' : 'settings')}
+              title="AI provider settings (BYOK / local models)"
+              className={`p-1.5 rounded-lg transition-colors ${
+                activeTab === 'settings'
+                  ? 'text-white bg-slate-800'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Settings2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setIsAiPaletteOpen(false)}
+              className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Mode Switcher */}
@@ -97,7 +129,26 @@ export const AiPalette: React.FC = () => {
 
         {/* Modal Body */}
         <div className="p-6 space-y-5">
-          {activeTab === 'course' ? (
+          {activeTab === 'settings' ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-slate-100">AI Providers — bring your own key</div>
+                  <div className="text-[11px] text-slate-400">
+                    Use a cloud key or a local model. Nothing is sent to us.
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('course')}
+                  className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1"
+                >
+                  <ArrowLeft className="w-3 h-3" />
+                  Back
+                </button>
+              </div>
+              <AiSettingsPanel />
+            </div>
+          ) : activeTab === 'course' ? (
             <>
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-2">
@@ -173,6 +224,19 @@ export const AiPalette: React.FC = () => {
             </div>
           )}
 
+          {notice && (
+            <div
+              className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${
+                notice.kind === 'error'
+                  ? 'bg-amber-950/70 border-amber-600/50 text-amber-200'
+                  : 'bg-slate-950 border-slate-700 text-slate-300'
+              }`}
+            >
+              <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="wrap-break-word">{notice.message}</span>
+            </div>
+          )}
+
           {successMsg && (
             <div className="p-3 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-2">
               <Check className="w-4 h-4" />
@@ -193,7 +257,7 @@ export const AiPalette: React.FC = () => {
             <button
               onClick={handleGenerateCourse}
               disabled={isGenerating || !topic.trim()}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-blue-600/30 transition-all cursor-pointer"
+              className="px-5 py-2.5 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-blue-600/30 transition-all cursor-pointer"
             >
               <Wand2 className="w-4 h-4" />
               <span>{isGenerating ? 'Generating Slides...' : 'Generate Course'}</span>

@@ -1,8 +1,23 @@
+﻿# dependencies
 node_modules/
-build/
+
+# build output
 dist/
+release/
+electron/dist/
 coverage/
+
+# electron-builder resources: keep the icon, ignore generated files
+/build/*
+!/build/icon.ico
+
+# local tooling artifacts
+.aistudio/
 .DS_Store
 *.log
-.env*
+
+# env / secrets
+.env
+.env.*
 !.env.example
+*ai-keys.json

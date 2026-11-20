@@ -291,12 +291,12 @@ export const PageTabs: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-[9px] font-semibold text-slate-600 bg-white/70 px-1 py-0.5 rounded-[2px] backdrop-blur-xs pointer-events-none">
+                <div className="flex items-center justify-between text-[9px] font-semibold text-slate-600 bg-white/70 px-1 py-0.5 rounded-xs backdrop-blur-xs pointer-events-none">
                   <span className="flex items-center gap-0.5">
                     <GripVertical className="w-2.5 h-2.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                     #{index + 1}
                   </span>
-                  <span className="truncate max-w-[54px]">{page.nodes.length} nodes</span>
+                  <span className="truncate max-w-13.5">{page.nodes.length} nodes</span>
                 </div>
               </div>
 

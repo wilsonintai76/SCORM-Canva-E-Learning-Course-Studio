@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useCourseStore } from '../../store/courseStore';
 import { AssetItem } from '../../types/schema';
+import { addMediaBlob } from '../../media/mediaStore';
 import {
   Shield,
   Target,
@@ -106,26 +107,24 @@ export const AssetsLibrary: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const cleanName = file.name.replace(/\.[^/.]+$/, '');
+    const cleanName = file.name.replace(/\.[^/.]+$/, '');
+    void (async () => {
+      const media = await addMediaBlob(file);
       const newAsset: AssetItem = {
         id: 'custom_asset_' + Date.now(),
         name: cleanName,
         category: 'images',
         type: 'image',
-        url: dataUrl,
+        url: media.url,
         width: 320,
         height: 200,
         tags: ['custom', 'uploaded', cleanName.toLowerCase()],
         isCustom: true,
       };
       addCustomAsset(newAsset);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+    })();
   };
 
   // Execute Bulk Rename

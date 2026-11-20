@@ -641,7 +641,7 @@ export const GlobalThemeEditor: React.FC = () => {
         {/* Apply Theme Button */}
         <button
           onClick={() => handleApply()}
-          className="w-full py-2.5 px-3 bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-pink-600/25 transition-all cursor-pointer"
+          className="w-full py-2.5 px-3 bg-linear-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-pink-600/25 transition-all cursor-pointer"
         >
           {appliedSuccess ? (
             <>

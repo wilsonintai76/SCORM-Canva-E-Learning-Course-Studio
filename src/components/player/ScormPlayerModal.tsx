@@ -246,7 +246,7 @@ export const ScormPlayerModal: React.FC = () => {
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <span className="text-xs font-mono text-slate-300 min-w-[32px]">
+            <span className="text-xs font-mono text-slate-300 min-w-8">
               {Math.round(progressPercent)}%
             </span>
           </div>

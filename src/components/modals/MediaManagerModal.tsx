@@ -129,7 +129,7 @@ export const MediaManagerModal: React.FC = () => {
         {/* Header */}
         <div className="h-16 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-purple-500/20">
+            <div className="w-9 h-9 rounded-xl bg-linear-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-purple-500/20">
               <Layers className="w-5 h-5" />
             </div>
             <div>
@@ -154,7 +154,7 @@ export const MediaManagerModal: React.FC = () => {
 
         {/* Toolbar: Search & Filters */}
         <div className="p-4 bg-slate-900/60 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="relative flex-1 min-w-[240px]">
+          <div className="relative flex-1 min-w-60">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -210,7 +210,7 @@ export const MediaManagerModal: React.FC = () => {
         {/* Asset Grid & Details Split Pane */}
         <div className="flex-1 overflow-hidden grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-800">
           {/* Asset List (Left 2 cols) */}
-          <div className="md:col-span-2 overflow-y-auto p-4 space-y-3 max-h-[500px]">
+          <div className="md:col-span-2 overflow-y-auto p-4 space-y-3 max-h-125">
             {filteredMedia.length === 0 ? (
               <div className="py-16 text-center text-slate-500">
                 <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-40" />

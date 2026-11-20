@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import { CourseManifest } from '../types/schema';
 import { generateImsManifestXml } from '../packager/xml';
 import { generateStandalonePlayerHtml } from '../packager/playerTemplate';
+import { extractScormMedia } from '../media/mediaStore';
 
 export interface ScormValidationResult {
   isValid: boolean;
@@ -101,8 +102,11 @@ export async function bundleCourseToScormZip(
   const zip = new JSZip();
   const fileEntries: ScormBundleFileEntry[] = [];
 
+  // Slide imagery is written as real files under media/ and referenced by relative path.
+  const { manifest: exported, files: mediaFiles } = await extractScormMedia(manifest);
+
   // 1. imsmanifest.xml (SCORM 1.2 Root Manifest)
-  const imsXml = generateImsManifestXml(manifest);
+  const imsXml = generateImsManifestXml(exported);
   zip.file('imsmanifest.xml', imsXml);
   fileEntries.push({
     path: 'imsmanifest.xml',
@@ -112,7 +116,7 @@ export async function bundleCourseToScormZip(
   });
 
   // 2. index.html (Self-contained HTML5 Player runtime)
-  const playerHtml = generateStandalonePlayerHtml(manifest);
+  const playerHtml = generateStandalonePlayerHtml(exported);
   zip.file('index.html', playerHtml);
   fileEntries.push({
     path: 'index.html',
@@ -122,7 +126,7 @@ export async function bundleCourseToScormZip(
   });
 
   // 3. course_data.json (Clean structured course manifest JSON)
-  const courseJson = JSON.stringify(manifest, null, 2);
+  const courseJson = JSON.stringify(exported, null, 2);
   zip.file('course_data.json', courseJson);
   fileEntries.push({
     path: 'course_data.json',
@@ -149,6 +153,12 @@ export async function bundleCourseToScormZip(
     type: 'text/xml',
     content: adlcpXsd,
   });
+
+  // 5. media/ files referenced by the slides
+  for (const file of mediaFiles) {
+    zip.file(file.path, file.bytes);
+    fileEntries.push({ path: file.path, size: file.bytes.byteLength, type: file.mime });
+  }
 
   const totalRawSize = fileEntries.reduce((acc, f) => acc + f.size, 0);
 

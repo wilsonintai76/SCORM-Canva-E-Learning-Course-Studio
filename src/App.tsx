@@ -16,12 +16,12 @@ import { ScormExportModal } from './components/export/ScormExportModal';
 import { ShortcutsModal } from './components/navigation/ShortcutsModal';
 import { AccessibilityModal } from './components/accessibility/AccessibilityModal';
 import { VersionHistoryDrawer } from './components/versioning/VersionHistoryDrawer';
-import { CollaborateModal } from './components/modals/CollaborateModal';
 import { GridSettingsModal } from './components/modals/GridSettingsModal';
 import { MediaManagerModal } from './components/modals/MediaManagerModal';
 import { BranchingFlowModal } from './components/modals/BranchingFlowModal';
 import { PdfHandoutModal } from './components/modals/PdfHandoutModal';
 import { GlobalCommandBar } from './components/navigation/GlobalCommandBar';
+import { DesktopMenuBridge } from './components/desktop/DesktopMenuBridge';
 
 export default function App() {
   return (
@@ -40,6 +40,7 @@ export default function App() {
       <PageTabs />
 
       {/* Global Modals & Drawers */}
+      <DesktopMenuBridge />
       <GlobalCommandBar />
       <ScormPlayerModal />
       <LmsDebuggerDrawer />
@@ -48,7 +49,6 @@ export default function App() {
       <ShortcutsModal />
       <AccessibilityModal />
       <VersionHistoryDrawer />
-      <CollaborateModal />
       <GridSettingsModal />
       <MediaManagerModal />
       <BranchingFlowModal />

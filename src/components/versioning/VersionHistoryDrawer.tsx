@@ -12,7 +12,7 @@ import {
   FileText,
   Check,
 } from 'lucide-react';
-import { triggerDownloadBlob } from '../../packager/zipPackager';
+import { saveBlobWithDialog } from '../../utils/saveFile';
 
 export const VersionHistoryDrawer: React.FC = () => {
   const {
@@ -44,13 +44,13 @@ export const VersionHistoryDrawer: React.FC = () => {
     }
   };
 
-  const handleDownloadSnapshot = (id: string) => {
+  const handleDownloadSnapshot = async (id: string) => {
     const snap = versionHistory.find((v) => v.id === id);
     if (!snap) return;
     const jsonStr = JSON.stringify(snap, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const safeName = snap.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-    triggerDownloadBlob(blob, `${safeName}_snapshot.json`);
+    await saveBlobWithDialog(blob, `${safeName}_snapshot.json`);
   };
 
   return (

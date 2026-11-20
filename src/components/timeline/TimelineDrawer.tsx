@@ -326,7 +326,7 @@ export const TimelineDrawer: React.FC<Props> = ({ isOpen, onClose, onScrubTimeCh
             <span>Animation Timeline</span>
           </div>
 
-          <div className="h-4 w-[1px] bg-slate-700" />
+          <div className="h-4 w-px bg-slate-700" />
 
           {/* Play / Pause / Reset Controls */}
           <div className="flex items-center gap-1">
@@ -605,7 +605,7 @@ export const TimelineDrawer: React.FC<Props> = ({ isOpen, onClose, onScrubTimeCh
 
             {/* Current Scrubber Needle Line */}
             <div
-              className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-30 pointer-events-none"
+              className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-30 pointer-events-none"
               style={{ left: `${(currentTime / totalDuration) * 100}%` }}
             >
               <div className="w-3 h-3 bg-red-500 rotate-45 -translate-x-[5px] -mt-1 shadow-md" />

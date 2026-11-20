@@ -1,0 +1,38 @@
+appId: com.scormcanva.studio
+productName: SCORM Canva Studio
+copyright: Copyright © 2026 SCORM Canva
+
+directories:
+  output: release
+  buildResources: build
+
+# Everything the app needs is baked into the bundle here - the installer only copies it.
+files:
+  - dist/**/*
+  - electron/dist/**/*
+  - package.json
+  - '!node_modules/**/*'
+
+asar: true
+compression: normal
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  requestedExecutionLevel: asInvoker
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: true
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SCORM Canva Studio
+  uninstallDisplayName: SCORM Canva Studio
+  # Course files live in %APPDATA%; never delete them on uninstall.
+  deleteAppDataOnUninstall: false

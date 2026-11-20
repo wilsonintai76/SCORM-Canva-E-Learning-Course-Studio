@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateCourseForScorm, bundleCourseToScormZip } from './scormBundleService';
 import { CourseManifest, QuizNode } from '../types/schema';
+import { addMediaBlob, mediaIdOf } from '../media/mediaStore';
+
+const PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 const mockCourse: CourseManifest = {
   id: 'COURSE_VAL_001',
@@ -93,4 +97,38 @@ test('bundleCourseToScormZip produces ZIP with imsmanifest.xml, index.html, and 
   assert.ok(paths.includes('course_data.json'));
   assert.ok(paths.includes('imscp_rootv1p1p2.xsd'));
   assert.ok(paths.includes('adlcp_rootv1p2.xsd'));
+});
+
+test('bundleCourseToScormZip externalises slide images into media/ files', async () => {
+  const bytes = Buffer.from(PNG_BASE64, 'base64');
+  const media = await addMediaBlob(new Blob([bytes], { type: 'image/png' }));
+  const mediaPath = `media/${mediaIdOf(media.ref)}`;
+
+  const courseWithImage: CourseManifest = {
+    ...mockCourse,
+    pages: [
+      {
+        ...mockCourse.pages[0],
+        nodes: [
+          {
+            id: 'img1',
+            type: 'image',
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+            url: media.url,
+          } as unknown as QuizNode,
+        ],
+      },
+    ],
+  };
+
+  const bundle = await bundleCourseToScormZip(courseWithImage);
+  const paths = bundle.files.map((file) => file.path);
+
+  assert.ok(paths.includes(mediaPath), 'image should ship as a real file');
+  const courseJson = bundle.files.find((file) => file.path === 'course_data.json')?.content ?? '';
+  assert.ok(courseJson.includes(mediaPath), 'course data should reference the relative media path');
+  assert.ok(!courseJson.includes('base64'), 'course data should not embed the image payload');
 });

@@ -39,7 +39,7 @@ export const LmsDebuggerDrawer: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-end animate-in fade-in duration-150">
-      <div className="w-[520px] bg-slate-950 border-l border-slate-800 h-full flex flex-col shadow-2xl">
+      <div className="w-130 bg-slate-950 border-l border-slate-800 h-full flex flex-col shadow-2xl">
         {/* Header */}
         <div className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
           <div className="flex items-center gap-2">
@@ -190,7 +190,7 @@ export const LmsDebuggerDrawer: React.FC = () => {
                   <tbody className="divide-y divide-slate-800/60 bg-slate-950">
                     {Object.entries(cmiData).map(([key, val]) => (
                       <tr key={key} className="hover:bg-slate-900/50">
-                        <td className="p-2 text-slate-400 font-medium truncate max-w-[180px]">
+                        <td className="p-2 text-slate-400 font-medium truncate max-w-45">
                           {key}
                         </td>
                         <td className="p-2 text-slate-200 break-all">

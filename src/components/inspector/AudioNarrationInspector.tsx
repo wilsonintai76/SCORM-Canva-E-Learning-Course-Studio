@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Page, AudioNarration } from '../../types/schema';
+import { addMediaBlob } from '../../media/mediaStore';
 import { Mic, Square, Play, Pause, Trash2, Upload, Volume2, Check } from 'lucide-react';
 
 interface Props {
@@ -37,20 +38,18 @@ export const AudioNarrationInspector: React.FC<Props> = ({ page, onUpdatePage })
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64Audio = reader.result as string;
+        void (async () => {
+          const media = await addMediaBlob(audioBlob);
           onUpdatePage({
             audioNarration: {
-              audioUrl: base64Audio,
+              audioUrl: media.url,
               name: `SlideVoiceover_${Date.now()}.webm`,
               duration: recordingSeconds || 5,
               waveform: generateWaveform(36),
               autoPlay: true,
             },
           });
-        };
-        reader.readAsDataURL(audioBlob);
+        })();
         stream.getTracks().forEach((track) => track.stop());
       };
 
@@ -97,20 +96,20 @@ export const AudioNarrationInspector: React.FC<Props> = ({ page, onUpdatePage })
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    void (async () => {
+      const media = await addMediaBlob(file);
       onUpdatePage({
         audioNarration: {
-          audioUrl: reader.result as string,
+          audioUrl: media.url,
           name: file.name,
           duration: 12,
           waveform: generateWaveform(36),
           autoPlay: true,
         },
       });
-    };
-    reader.readAsDataURL(file);
+    })();
   };
 
   const handleRemoveNarration = () => {
@@ -194,7 +193,7 @@ export const AudioNarrationInspector: React.FC<Props> = ({ page, onUpdatePage })
       ) : (
         <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2.5">
           <div className="flex items-center justify-between">
-            <div className="truncate max-w-[170px]">
+            <div className="truncate max-w-42.5">
               <div className="font-semibold text-slate-200 truncate text-[11px]">
                 {narration.name || 'Slide Audio'}
               </div>
@@ -226,7 +225,7 @@ export const AudioNarrationInspector: React.FC<Props> = ({ page, onUpdatePage })
             {(narration.waveform || generateWaveform(36)).map((height, idx) => (
               <div
                 key={idx}
-                className="flex-1 bg-gradient-to-t from-cyan-600 to-blue-400 rounded-t-[1px] transition-all"
+                className="flex-1 bg-linear-to-t from-cyan-600 to-blue-400 rounded-t-[1px] transition-all"
                 style={{
                   height: `${height}%`,
                   opacity: isPlaying ? 0.9 : 0.6,

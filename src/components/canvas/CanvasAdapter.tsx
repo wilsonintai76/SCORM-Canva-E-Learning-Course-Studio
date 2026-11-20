@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useCourseStore, globalCourseStore } from '../../store/courseStore';
 import { CanvasNode, NodeType, TextNode, AssetItem, CanvasGuide } from '../../types/schema';
+import { addMediaBlob } from '../../media/mediaStore';
 import { TypographyPreset } from '../../data/typographyData';
 import { ComponentTemplateItem } from '../../data/componentTemplatesData';
 import {
@@ -1345,9 +1346,8 @@ export const CanvasAdapter: React.FC = () => {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
       if (file && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
+        void (async () => {
+          const media = await addMediaBlob(file);
           const imgWidth = 360;
           const imgHeight = 240;
           let posX = Math.max(20, Math.min(canvasWidth - imgWidth - 20, Math.round(dropX - imgWidth / 2)));
@@ -1364,7 +1364,7 @@ export const CanvasAdapter: React.FC = () => {
             { x: posX, y: posY },
             {
               alt: assetName,
-              url: dataUrl,
+              url: media.url,
               width: imgWidth,
               height: imgHeight,
             }
@@ -1375,7 +1375,7 @@ export const CanvasAdapter: React.FC = () => {
             name: assetName,
             category: 'images',
             type: 'image',
-            url: dataUrl,
+            url: media.url,
             width: imgWidth,
             height: imgHeight,
             tags: ['desktop-upload', 'dropped'],
@@ -1384,8 +1384,7 @@ export const CanvasAdapter: React.FC = () => {
 
           setLayoutToast(`Uploaded & added "${file.name}" to canvas!`);
           setTimeout(() => setLayoutToast(null), 2500);
-        };
-        reader.readAsDataURL(file);
+        })();
         return;
       }
     }
@@ -1684,7 +1683,7 @@ export const CanvasAdapter: React.FC = () => {
           <span className="hidden md:inline font-medium text-[11px]">Pin Note</span>
         </button>
 
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        <div className="w-px h-4 bg-slate-700 mx-1" />
 
         <button
           title="Zoom Out"
@@ -1693,7 +1692,7 @@ export const CanvasAdapter: React.FC = () => {
         >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
-        <span className="text-[11px] font-mono text-slate-300 min-w-[40px] text-center">
+        <span className="text-[11px] font-mono text-slate-300 min-w-10 text-center">
           {Math.round(zoom * 100)}%
         </span>
         <button
@@ -1704,7 +1703,7 @@ export const CanvasAdapter: React.FC = () => {
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
 
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        <div className="w-px h-4 bg-slate-700 mx-1" />
 
         <button
           title="Fit Slide to Screen"
@@ -1723,7 +1722,7 @@ export const CanvasAdapter: React.FC = () => {
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
 
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        <div className="w-px h-4 bg-slate-700 mx-1" />
 
         <button
           title={`Snap to Grid (${gridSize}px) — Double-click to open Grid Settings`}
@@ -1753,7 +1752,7 @@ export const CanvasAdapter: React.FC = () => {
           <span className="hidden lg:inline">Smart</span>
         </button>
 
-        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+        <div className="w-px h-4 bg-slate-700 mx-1" />
 
         <button
           title="Toggle Timeline Animation Editor (Shift + A)"
@@ -1831,7 +1830,7 @@ export const CanvasAdapter: React.FC = () => {
               <span className="hidden md:inline font-medium">Right</span>
             </button>
 
-            <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+            <div className="w-px h-4 bg-slate-700 mx-1" />
 
             <button
               onClick={() => alignSelected('top')}
@@ -1859,7 +1858,7 @@ export const CanvasAdapter: React.FC = () => {
             </button>
           </div>
 
-          <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+          <div className="w-px h-4 bg-slate-700 mx-1" />
 
           <div className="flex items-center gap-0.5">
             <span className="text-[10px] uppercase font-bold text-slate-400 mr-1 hidden sm:inline">Space:</span>
@@ -1883,7 +1882,7 @@ export const CanvasAdapter: React.FC = () => {
             </button>
           </div>
 
-          <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+          <div className="w-px h-4 bg-slate-700 mx-1" />
 
           {/* Group / Ungroup Toggle */}
           {!isSelectedGrouped ? (
@@ -2339,9 +2338,9 @@ export const CanvasAdapter: React.FC = () => {
 
                   {/* Visual Guide Line */}
                   <div
-                    className={`h-[1px] w-full transition-all ${
+                    className={`h-px w-full transition-all ${
                       isHovered
-                        ? 'h-[2px] bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]'
+                        ? 'h-0.5 bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]'
                         : guide.isLocked
                         ? 'bg-amber-400/80 border-t border-dashed border-amber-400'
                         : 'bg-cyan-400/90 shadow-[0_0_4px_rgba(34,211,238,0.5)]'
@@ -2396,9 +2395,9 @@ export const CanvasAdapter: React.FC = () => {
 
                 {/* Visual Guide Line */}
                 <div
-                  className={`w-[1px] h-full transition-all ${
+                  className={`w-px h-full transition-all ${
                     isHovered
-                      ? 'w-[2px] bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]'
+                      ? 'w-0.5 bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]'
                       : guide.isLocked
                       ? 'bg-amber-400/80 border-l border-dashed border-amber-400'
                       : 'bg-cyan-400/90 shadow-[0_0_4px_rgba(34,211,238,0.5)]'
@@ -2442,8 +2441,8 @@ export const CanvasAdapter: React.FC = () => {
           <div
             className={`absolute pointer-events-none z-50 ${
               draggingGuide.orientation === 'horizontal'
-                ? 'left-0 right-0 h-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,1)]'
-                : 'top-0 bottom-0 w-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,1)]'
+                ? 'left-0 right-0 h-0.5 bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,1)]'
+                : 'top-0 bottom-0 w-0.5 bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,1)]'
             }`}
             style={
               draggingGuide.orientation === 'horizontal'
@@ -2488,11 +2487,11 @@ export const CanvasAdapter: React.FC = () => {
                 key={`sg_x_${idx}_${guide.val}_${guide.type}`}
                 className={`absolute top-0 bottom-0 pointer-events-none z-50 animate-in fade-in duration-75 ${
                   isTideSnap
-                    ? 'w-[2px] bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]'
+                    ? 'w-0.5 bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]'
                     : isSmartSpacing
-                    ? 'w-[2px] bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.95)]'
+                    ? 'w-0.5 bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.95)]'
                     : isGuide
-                    ? 'w-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,1)]'
+                    ? 'w-0.5 bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,1)]'
                     : isGrid
                     ? 'w-[1.5px] border-l border-dashed border-sky-400 opacity-90'
                     : isPage
@@ -2544,11 +2543,11 @@ export const CanvasAdapter: React.FC = () => {
                 key={`sg_y_${idx}_${guide.val}_${guide.type}`}
                 className={`absolute left-0 right-0 pointer-events-none z-50 animate-in fade-in duration-75 ${
                   isTideSnap
-                    ? 'h-[2px] bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]'
+                    ? 'h-0.5 bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]'
                     : isSmartSpacing
-                    ? 'h-[2px] bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.95)]'
+                    ? 'h-0.5 bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.95)]'
                     : isGuide
-                    ? 'h-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,1)]'
+                    ? 'h-0.5 bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,1)]'
                     : isGrid
                     ? 'h-[1.5px] border-t border-dashed border-sky-400 opacity-90'
                     : isPage
@@ -2590,7 +2589,7 @@ export const CanvasAdapter: React.FC = () => {
           const groupMeta = (currentPage.groups || []).find((g) => g.id === deepSelectedGroupId);
           return (
             <div
-              className="absolute border border-dashed border-amber-400/70 bg-amber-500/[0.03] pointer-events-none z-20 rounded"
+              className="absolute border border-dashed border-amber-400/70 bg-amber-500/3 pointer-events-none z-20 rounded"
               style={{
                 left: `${parentBounds.x - 6}px`,
                 top: `${parentBounds.y - 6}px`,
@@ -2623,10 +2622,10 @@ export const CanvasAdapter: React.FC = () => {
             </div>
             <div>
               <div className="text-[10px] font-bold text-slate-200 flex items-center gap-1.5">
-                <span className="truncate max-w-[110px]">{currentPage.audioNarration.name || 'Slide Audio'}</span>
+                <span className="truncate max-w-27.5">{currentPage.audioNarration.name || 'Slide Audio'}</span>
                 <span className="text-cyan-400 font-mono">~{currentPage.audioNarration.duration || 5}s</span>
               </div>
-              <div className="flex items-end gap-[2px] h-3 mt-1">
+              <div className="flex items-end gap-0.5 h-3 mt-1">
                 {(currentPage.audioNarration.waveform || [40, 70, 50, 90, 60, 80, 100, 45, 75, 95, 35, 65, 85, 55, 70, 90, 40, 60]).slice(0, 18).map((h, i) => (
                   <div
                     key={i}
@@ -2642,7 +2641,7 @@ export const CanvasAdapter: React.FC = () => {
         {/* Marquee Lasso Selection Overlay */}
         {marqueeState && (
           <div
-            className="absolute border-2 border-dashed border-sky-400 bg-sky-500/15 ring-2 ring-sky-400/20 shadow-[0_0_15px_rgba(56,189,248,0.3)] z-50 pointer-events-none rounded-[2px]"
+            className="absolute border-2 border-dashed border-sky-400 bg-sky-500/15 ring-2 ring-sky-400/20 shadow-[0_0_15px_rgba(56,189,248,0.3)] z-50 pointer-events-none rounded-xs"
             style={{
               left: `${Math.min(marqueeState.startX, marqueeState.currentX)}px`,
               top: `${Math.min(marqueeState.startY, marqueeState.currentY)}px`,
@@ -2715,7 +2714,7 @@ export const CanvasAdapter: React.FC = () => {
                 <span>{selectedNodes.length} Selected</span>
               </div>
 
-              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+              <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
               {/* Group / Ungroup Button */}
               {!isSelectedGrouped ? (
@@ -2738,7 +2737,7 @@ export const CanvasAdapter: React.FC = () => {
                 </button>
               )}
 
-              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+              <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
               {/* Quick Alignment Controls */}
               <div className="flex items-center gap-0.5">
@@ -2805,7 +2804,7 @@ export const CanvasAdapter: React.FC = () => {
                 )}
               </div>
 
-              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+              <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
               {/* Save Group to Resource Library */}
               <button
@@ -2823,7 +2822,7 @@ export const CanvasAdapter: React.FC = () => {
                 <span>Save Resource</span>
               </button>
 
-              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+              <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
               {/* Scale Quick Presets */}
               <div className="flex items-center gap-0.5">
@@ -2843,7 +2842,7 @@ export const CanvasAdapter: React.FC = () => {
                 </button>
               </div>
 
-              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+              <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
               {/* Bulk Delete Button */}
               <button
@@ -2956,7 +2955,7 @@ export const CanvasAdapter: React.FC = () => {
               {isSelected && (
                 <>
                   <div
-                    className={`absolute -inset-[2px] border-2 border-dashed ${
+                    className={`absolute -inset-0.5 border-2 border-dashed ${
                       node.isLocked
                         ? 'border-amber-400 ring-2 ring-amber-400/25 shadow-[0_0_10px_rgba(251,191,36,0.35)]'
                         : isPrimarySelected
@@ -3042,7 +3041,7 @@ export const CanvasAdapter: React.FC = () => {
                         </>
                       )}
 
-                      <div className="w-[1px] h-3.5 bg-slate-700 mx-0.5" />
+                      <div className="w-px h-3.5 bg-slate-700 mx-0.5" />
                       <button
                         title="Delete (Del)"
                         onClick={() => deleteNode(node.id)}
@@ -3199,7 +3198,7 @@ export const CanvasAdapter: React.FC = () => {
           <button
             title="Select Zoom Preset Level"
             onClick={() => setIsZoomMenuOpen(!isZoomMenuOpen)}
-            className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 rounded-lg text-xs font-mono font-bold text-sky-400 border border-slate-700 hover:border-sky-500/50 transition-colors flex items-center gap-1 cursor-pointer min-w-[56px] justify-center"
+            className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 rounded-lg text-xs font-mono font-bold text-sky-400 border border-slate-700 hover:border-sky-500/50 transition-colors flex items-center gap-1 cursor-pointer min-w-14 justify-center"
           >
             <span>{Math.round(zoom * 100)}%</span>
           </button>
@@ -3261,7 +3260,7 @@ export const CanvasAdapter: React.FC = () => {
           <ZoomIn className="w-4 h-4" />
         </button>
 
-        <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+        <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
         <button
           title="Fit Slide to Viewport"

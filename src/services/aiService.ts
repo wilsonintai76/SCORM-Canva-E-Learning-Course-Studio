@@ -1,16 +1,12 @@
-import { GoogleGenAI, Type } from '@google/genai';
 import { CourseManifest, Page, QuizNode } from '../types/schema';
-
-// Helper to get Gemini client
-function getGenAiClient(): GoogleGenAI | null {
-  const apiKey = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_GEMINI_API_KEY ||
-    (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '');
-
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return new GoogleGenAI({ apiKey });
-}
+import {
+  AiSettings,
+  loadAiSettings,
+  providerInfo,
+  validateAiSettings,
+} from './aiSettings';
+import { loadApiKey } from './aiKeyStore';
+import { requestGeneratedJson } from './aiProviders';
 
 export interface GeneratedCourseData {
   title: string;
@@ -26,17 +22,15 @@ export interface GeneratedCourseData {
   }[];
 }
 
-/**
- * Generates an interactive e-learning course outline and slides from a topic prompt
- */
-export async function generateCourseWithAi(topic: string, slideCount = 4): Promise<CourseManifest> {
-  const ai = getGenAiClient();
+export interface AiGenerationResult {
+  course: CourseManifest;
+  providerLabel: string;
+  usedFallback: boolean;
+  error?: string;
+}
 
-  if (ai) {
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `You are an expert instructional designer building an interactive SCORM 1.2 e-learning course on: "${topic}".
+function buildPrompt(topic: string, slideCount: number): string {
+  return `You are an expert instructional designer building an interactive SCORM 1.2 e-learning course on: "${topic}".
 Generate exactly ${slideCount} structured slides in strict JSON format.
 Each slide must include a title, strong headline, clear instructional body text, and a key takeaway callout.
 The final slide or one of the middle slides must include an interactive quiz question with 3 options, indicating which isCorrect and clear feedback.
@@ -60,24 +54,103 @@ Output purely valid JSON conforming to this schema:
       ]
     }
   ]
-}`,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+}`;
+}
 
-      const parsed: GeneratedCourseData = JSON.parse(response.text || '{}');
-      if (parsed && parsed.slides && parsed.slides.length > 0) {
-        return buildManifestFromAiData(parsed, topic);
-      }
-    } catch (err) {
-      console.warn('[AI] Gemini generation failed, switching to smart algorithmic synthesis:', err);
-    }
+function asGeneratedCourse(value: unknown): GeneratedCourseData | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<GeneratedCourseData>;
+  if (!Array.isArray(candidate.slides) || candidate.slides.length === 0) return null;
+  const slides = candidate.slides.filter(
+    (slide) => slide && typeof slide === 'object' && typeof slide.title === 'string'
+  );
+  if (slides.length === 0) return null;
+  return {
+    title: typeof candidate.title === 'string' ? candidate.title : 'AI Generated Course',
+    description: typeof candidate.description === 'string' ? candidate.description : '',
+    slides,
+  };
+}
+
+/** Generates a course with the configured provider, falling back to the offline template. */
+export async function generateCourseWithAi(
+  topic: string,
+  slideCount = 4,
+  settingsOverride?: AiSettings
+): Promise<AiGenerationResult> {
+  const settings = settingsOverride ?? loadAiSettings();
+  const info = providerInfo(settings.provider);
+  const apiKey = await loadApiKey(settings.provider);
+
+  const validation = validateAiSettings(settings, apiKey);
+  if (!validation.ok) {
+    return {
+      course: generateAlgorithmicCourse(topic, slideCount),
+      providerLabel: 'Offline template',
+      usedFallback: true,
+      error: validation.error,
+    };
   }
 
-  // High quality algorithmic fallback generator
-  return generateAlgorithmicCourse(topic, slideCount);
+  try {
+    const generated = await requestGeneratedJson(settings, apiKey, buildPrompt(topic, slideCount));
+    const data = asGeneratedCourse(generated);
+    if (!data) throw new Error('The AI response did not contain any slides.');
+    return {
+      course: buildManifestFromAiData(data, topic),
+      providerLabel: info.label,
+      usedFallback: false,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown AI error';
+    console.warn(`[AI] ${info.label} generation failed, using offline template:`, message);
+    return {
+      course: generateAlgorithmicCourse(topic, slideCount),
+      providerLabel: 'Offline template',
+      usedFallback: true,
+      error: message,
+    };
+  }
 }
+
+export interface AiConnectionCheck {
+  ok: boolean;
+  message: string;
+  providerLabel: string;
+}
+
+/** Sends a tiny prompt to confirm the key, URL and model actually work. */
+export async function testAiConnection(settings: AiSettings, apiKey: string): Promise<AiConnectionCheck> {
+  const info = providerInfo(settings.provider);
+  const validation = validateAiSettings(settings, apiKey);
+  if (!validation.ok) {
+    return { ok: false, message: validation.error ?? 'Invalid configuration', providerLabel: info.label };
+  }
+
+  try {
+    const result = await requestGeneratedJson(
+      settings,
+      apiKey,
+      'Reply with only this JSON object and nothing else: {"status":"ok"}'
+    );
+    const parsed = result as { status?: unknown } | null;
+    const ok = Boolean(parsed && parsed.status === 'ok');
+    return {
+      ok,
+      message: ok
+        ? `Connected to ${info.label} · ${settings.model}`
+        : `${info.label} responded, but not with the expected JSON.`,
+      providerLabel: info.label,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : 'Connection failed',
+      providerLabel: info.label,
+    };
+  }
+}
+
 
 function buildManifestFromAiData(data: GeneratedCourseData, topic: string): CourseManifest {
   const pages: Page[] = data.slides.map((s, idx) => {

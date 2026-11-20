@@ -25,6 +25,15 @@ import {
   applyBrandTokensToResourceNodes,
 } from '../data/resourceLibraryData';
 import {
+  adoptInlineMedia,
+  adoptInlineNodes,
+  dehydrateManifest,
+  dehydrateNodes,
+  hydrateManifest,
+  hydrateNodes,
+  inlineManifestMedia,
+} from '../media/mediaStore';
+import {
   globalCommandManager,
   Command,
   CourseSnapshotCommand,
@@ -150,6 +159,7 @@ export class CourseStore {
 
   private pendingSnapshotCommand: CourseSnapshotCommand | null = null;
   private listeners: Set<Listener> = new Set();
+  private mediaRestored = false;
 
   constructor() {
     globalCommandManager.subscribe(() => {
@@ -252,6 +262,8 @@ export class CourseStore {
     } catch {
       // ignore
     }
+
+    void this.restoreMedia();
   }
 
   private persistSession(): void {
@@ -271,7 +283,11 @@ export class CourseStore {
 
   private persistVersions(): void {
     try {
-      localStorage.setItem('scorm_canva_versions', JSON.stringify(this.versionHistory));
+      const compact = this.versionHistory.map((snapshot) => ({
+        ...snapshot,
+        course: dehydrateManifest(snapshot.course),
+      }));
+      localStorage.setItem('scorm_canva_versions', JSON.stringify(compact));
     } catch {
       // ignore
     }
@@ -279,9 +295,44 @@ export class CourseStore {
 
   private persistMyAssets(): void {
     try {
-      localStorage.setItem('scorm_canva_my_assets', JSON.stringify(this.myAssets));
+      const compact = this.myAssets.map((asset) => ({
+        ...asset,
+        nodes: dehydrateNodes(asset.nodes),
+      }));
+      localStorage.setItem('scorm_canva_my_assets', JSON.stringify(compact));
     } catch {
       // ignore
+    }
+  }
+
+  /**
+   * Media bytes live in the media store; the persisted JSON only holds `media://` refs.
+   * On startup we resolve those refs back into object URLs and migrate legacy data URLs.
+   */
+  private async restoreMedia(): Promise<void> {
+    if (this.mediaRestored) return;
+    this.mediaRestored = true;
+
+    const snapshot = this.course;
+    const hydratedCourse = await hydrateManifest(snapshot);
+    // A user edit during hydration must win over the hydrated snapshot.
+    this.course = this.course === snapshot ? hydratedCourse : await hydrateManifest(this.course);
+    this.myAssets = await Promise.all(
+      this.myAssets.map(async (asset) => ({ ...asset, nodes: await hydrateNodes(asset.nodes) }))
+    );
+    this.listeners.forEach((listener) => listener());
+
+    try {
+      await adoptInlineMedia(this.course);
+      for (const asset of this.myAssets) {
+        // Built-in library assets stay inline; only user uploads belong in the store.
+        if (asset.isBuiltIn) continue;
+        await adoptInlineNodes(asset.nodes);
+      }
+      // Persisting once after migration shrinks the stored payload from megabytes to kilobytes.
+      this.notify(false);
+    } catch (error) {
+      console.warn('Media migration skipped', error);
     }
   }
 
@@ -319,7 +370,7 @@ export class CourseStore {
     this.isSaving = true;
     this.lastSavedTime = Date.now();
     try {
-      localStorage.setItem('scorm_canva_course_state', JSON.stringify(this.course));
+      localStorage.setItem('scorm_canva_course_state', JSON.stringify(dehydrateManifest(this.course)));
       if (this.course.theme) {
         localStorage.setItem('scorm_canva_global_theme', JSON.stringify(this.course.theme));
       }
@@ -1014,6 +1065,13 @@ export class CourseStore {
     this.selectedNodeId = null;
     this.selectedNodeIds = [];
     this.notify();
+    // Snapshots are stored as references, so resolve their media before rendering.
+    const restored = this.course;
+    void hydrateManifest(restored).then((hydrated) => {
+      if (this.course !== restored) return;
+      this.course = hydrated;
+      this.notify(false);
+    });
     return true;
   }
 
@@ -1253,12 +1311,16 @@ export class CourseStore {
     return instantiatedNodes;
   }
 
-  public exportProjectJson(): string {
+  public async exportProjectJson(): Promise<string> {
     const exportData = {
       exportedAt: new Date().toISOString(),
       generator: 'SCORM Canva v1.2',
-      course: this.course,
-      versionHistory: this.versionHistory,
+      // Backups stay self-contained: media is inlined so the file is portable on its own.
+      course: await inlineManifestMedia(this.course),
+      versionHistory: this.versionHistory.map((snapshot) => ({
+        ...snapshot,
+        course: dehydrateManifest(snapshot.course),
+      })),
     };
     return JSON.stringify(exportData, null, 2);
   }
@@ -1283,6 +1345,12 @@ export class CourseStore {
       this.selectedNodeId = null;
       this.selectedNodeIds = [];
       this.notify();
+      const imported = this.course;
+      void hydrateManifest(imported).then((hydrated) => {
+        if (this.course !== imported) return;
+        this.course = hydrated;
+        this.notify(false);
+      });
       return true;
     } catch (err) {
       console.error('Failed to import project JSON:', err);
@@ -1318,6 +1386,29 @@ export class CourseStore {
     this.activePageIndex = 0;
     this.selectedNodeId = null;
     this.notify();
+  }
+
+  /**
+   * Starts a brand new project. The outgoing course is snapshotted first so a
+   * mistaken "New Course" never destroys work.
+   */
+  public startNewCourse(next: CourseManifest, snapshotLabel?: string): void {
+    this.saveVersion(snapshotLabel || `Before new course · ${this.course.title}`);
+    this.course = JSON.parse(JSON.stringify(next));
+    this.activePageIndex = 0;
+    this.selectedNodeId = null;
+    this.selectedNodeIds = [];
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
+    this.notify();
+    // New projects start with a clean media timeline but keep stored files for
+    // snapshots that still reference them.
+    const started = this.course;
+    void hydrateManifest(started).then((hydrated) => {
+      if (this.course !== started) return;
+      this.course = hydrated;
+      this.notify(false);
+    });
   }
 
   public updateManifest(updates: Partial<CourseManifest>): void {
@@ -2529,6 +2620,8 @@ export function useCourseStore() {
       (n) => n.id === state.selectedNodeId
     ),
     loadCourse: (course: CourseManifest) => globalCourseStore.loadCourse(course),
+    startNewCourse: (course: CourseManifest, snapshotLabel?: string) =>
+      globalCourseStore.startNewCourse(course, snapshotLabel),
     updateManifest: (updates: Partial<CourseManifest>) => globalCourseStore.updateManifest(updates),
     setActivePage: (idx: number) => globalCourseStore.setActivePage(idx),
     setSelectedNodeId: (id: string | null) => globalCourseStore.setSelectedNodeId(id),

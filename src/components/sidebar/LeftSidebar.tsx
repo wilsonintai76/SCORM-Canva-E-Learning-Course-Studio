@@ -382,7 +382,7 @@ export const LeftSidebar: React.FC = () => {
             {/* AI Generator CTA Banner */}
             <div
               onClick={() => setIsAiPaletteOpen(true)}
-              className="p-3 rounded-xl bg-gradient-to-br from-indigo-950/90 via-blue-950/70 to-slate-900 border border-blue-500/30 hover:border-blue-400 cursor-pointer transition-all shadow-md group"
+              className="p-3 rounded-xl bg-linear-to-br from-indigo-950/90 via-blue-950/70 to-slate-900 border border-blue-500/30 hover:border-blue-400 cursor-pointer transition-all shadow-md group"
             >
               <div className="flex items-center gap-2 text-blue-400 text-xs font-bold mb-1">
                 <Sparkles className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />

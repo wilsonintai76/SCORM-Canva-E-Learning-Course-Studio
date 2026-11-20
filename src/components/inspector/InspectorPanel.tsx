@@ -98,7 +98,7 @@ export const InspectorPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('element')}
           title="Element properties and styling"
-          className={`flex-1 min-w-[66px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-16.5 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'element' ||
             (selectedNode &&
               activeTab !== 'course' &&
@@ -119,7 +119,7 @@ export const InspectorPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('layers')}
           title="Slide layer stack list view, reordering, grouping, locking, and hiding"
-          className={`flex-1 min-w-[62px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-15.5 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'layers'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
@@ -133,7 +133,7 @@ export const InspectorPanel: React.FC = () => {
           <button
             onClick={() => setActiveTab('animations')}
             title="Timeline animation configuration for selected element"
-            className={`flex-1 min-w-[58px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+            className={`flex-1 min-w-14.5 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
               activeTab === 'animations'
                 ? 'bg-amber-600 text-white font-semibold'
                 : 'text-amber-400 hover:text-amber-200'
@@ -148,7 +148,7 @@ export const InspectorPanel: React.FC = () => {
           <button
             onClick={() => setActiveTab('quiz_logic')}
             title="Quiz logic, answers, feedback messages and result screen routing"
-            className={`flex-1 min-w-[68px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+            className={`flex-1 min-w-17 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
               activeTab === 'quiz_logic'
                 ? 'bg-emerald-600 text-white font-semibold'
                 : 'text-emerald-400 hover:text-emerald-200'
@@ -162,7 +162,7 @@ export const InspectorPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('slide')}
           title="Slide background and settings"
-          className={`flex-1 min-w-[56px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-14 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'slide' || (!selectedNode && activeTab === 'element')
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
@@ -174,7 +174,7 @@ export const InspectorPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('variables')}
           title="Dynamic course variables management"
-          className={`flex-1 min-w-[56px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-14 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'variables'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
@@ -186,7 +186,7 @@ export const InspectorPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('tokens')}
           title="Global Design Tokens (Colors, Typography & Spacing)"
-          className={`flex-1 min-w-[64px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-16 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'tokens'
               ? 'bg-pink-600/90 text-white font-semibold'
               : 'text-pink-400 hover:text-pink-200'
@@ -198,7 +198,7 @@ export const InspectorPanel: React.FC = () => {
         <button
           onClick={() => setActiveTab('course')}
           title="SCORM 1.2 manifest and LMS configuration"
-          className={`flex-1 min-w-[62px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-15.5 py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'course' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -875,7 +875,7 @@ export const InspectorPanel: React.FC = () => {
             <div className="pt-4 border-t border-slate-800">
               <button
                 onClick={() => setIsAiPaletteOpen(true)}
-                className="w-full py-2.5 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-medium flex items-center justify-center gap-2 shadow-sm transition-all"
+                className="w-full py-2.5 px-3 bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-medium flex items-center justify-center gap-2 shadow-sm transition-all"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>AI Slide Assistant</span>
