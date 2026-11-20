@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useCourseStore } from '../../store/courseStore';
 import { ScormClient } from '../../scorm/client';
 import { CanvasNode, QuizNode } from '../../types/schema';
+import { interpolateVariables } from '../../utils/variableInterpolator';
 import {
   X,
   ChevronLeft,
@@ -217,6 +218,10 @@ export const ScormPlayerModal: React.FC = () => {
 
   const currentPage = pages[currentPageIndex];
   const progressPercent = pages.length > 0 ? ((currentPageIndex + 1) / pages.length) * 100 : 100;
+  const runtimeVariables: Record<string, string> = {
+    score: String(sessionScore),
+    quizScore: String(sessionScore),
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex flex-col items-center justify-between overflow-hidden select-none animate-in fade-in duration-150">
@@ -323,9 +328,12 @@ export const ScormPlayerModal: React.FC = () => {
                       zIndex: node.zIndex || 1,
                       color: node.color || '#0f172a',
                       fontSize: `${node.fontSize || 16}px`,
+                      fontFamily: node.fontFamily || undefined,
                       fontWeight:
                         node.fontWeight === 'bold'
                           ? 700
+                          : node.fontWeight === 'black'
+                          ? 900
                           : node.fontWeight === 'semibold'
                           ? 600
                           : 400,
@@ -333,12 +341,12 @@ export const ScormPlayerModal: React.FC = () => {
                       backgroundColor: node.backgroundColor,
                       borderRadius: node.borderRadius ? `${node.borderRadius}px` : undefined,
                       padding: node.padding ? `${node.padding}px` : undefined,
-                      lineHeight: 1.35,
+                      lineHeight: node.lineHeight || 1.35,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}
                   >
-                    {node.content}
+                    {interpolateVariables(node.content, course.variables || [], runtimeVariables)}
                   </div>
                 );
               }
@@ -418,8 +426,12 @@ export const ScormPlayerModal: React.FC = () => {
                       zIndex: node.zIndex || 1,
                     }}
                   >
-                    <h4 className="text-sm font-bold mb-1">{node.title || 'Note'}</h4>
-                    <p className="text-xs leading-relaxed opacity-90">{node.content}</p>
+                    <h4 className="text-sm font-bold mb-1">
+                      {interpolateVariables(node.title || 'Note', course.variables || [], runtimeVariables)}
+                    </h4>
+                    <p className="text-xs leading-relaxed opacity-90">
+                      {interpolateVariables(node.content, course.variables || [], runtimeVariables)}
+                    </p>
                   </div>
                 );
               }
@@ -454,7 +466,7 @@ export const ScormPlayerModal: React.FC = () => {
                       </div>
 
                       <h3 className="text-base font-semibold text-slate-900 leading-snug mb-4">
-                        {quiz.question}
+                        {interpolateVariables(quiz.question, course.variables || [], runtimeVariables)}
                       </h3>
 
                       <div className="space-y-2.5">

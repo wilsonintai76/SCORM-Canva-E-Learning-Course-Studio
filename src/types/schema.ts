@@ -1,8 +1,57 @@
-/**
- * Course and Manifest Schema for SCORM Canva
- */
-
 export type NodeType = 'text' | 'image' | 'quiz' | 'shape' | 'callout';
+
+export type EntryAnimationType =
+  | 'none'
+  | 'fade-in'
+  | 'slide-in-left'
+  | 'slide-in-right'
+  | 'slide-in-top'
+  | 'slide-in-bottom'
+  | 'zoom-in'
+  | 'bounce-in'
+  | 'flip-in';
+
+export type EmphasisAnimationType =
+  | 'none'
+  | 'pulse'
+  | 'bounce'
+  | 'spin'
+  | 'shake'
+  | 'flash'
+  | 'float';
+
+export type ExitAnimationType =
+  | 'none'
+  | 'fade-out'
+  | 'slide-out-left'
+  | 'slide-out-right'
+  | 'slide-out-bottom'
+  | 'zoom-out'
+  | 'bounce-out';
+
+export interface ElementAnimationConfig {
+  enter?: 'none' | 'fade' | 'slide-up' | 'slide-left' | 'zoom' | 'bounce';
+  exit?: 'none' | 'fade' | 'slide-down' | 'zoom' | ExitAnimationType;
+  duration?: number;
+  entry?: {
+    type: EntryAnimationType;
+    delay: number; // in seconds
+    duration: number; // in seconds
+    easing?: 'linear' | 'ease-in-out' | 'bounce' | 'elastic';
+  };
+  emphasis?: {
+    type: EmphasisAnimationType;
+    delay: number; // in seconds
+    duration: number; // in seconds
+    repeat?: number | 'infinite';
+  };
+  exitAnim?: {
+    type: ExitAnimationType;
+    delay: number; // in seconds
+    duration: number; // in seconds
+    easing?: 'linear' | 'ease-in-out' | 'bounce';
+  };
+}
 
 export interface BaseNode {
   id: string;
@@ -17,11 +66,7 @@ export interface BaseNode {
   isLocked?: boolean;
   isHidden?: boolean;
   name?: string;
-  animation?: {
-    enter: 'none' | 'fade' | 'slide-up' | 'slide-left' | 'zoom' | 'bounce';
-    exit?: 'none' | 'fade' | 'slide-down' | 'zoom';
-    duration?: number;
-  };
+  animation?: ElementAnimationConfig;
 }
 
 export interface TextNode extends BaseNode {
@@ -65,6 +110,8 @@ export interface QuizLogicConfig {
   targetSlideId?: string;
   correctFeedback?: string;
   incorrectFeedback?: string;
+  targetVariableId?: string;
+  updateVariableMode?: 'add' | 'set';
 }
 
 export interface QuizNode extends BaseNode {
@@ -112,6 +159,14 @@ export interface AudioNarration {
   waveform?: number[];
 }
 
+export interface CanvasGuide {
+  id: string;
+  orientation: 'horizontal' | 'vertical';
+  position: number;
+  color?: string;
+  isLocked?: boolean;
+}
+
 export interface Page {
   id: string;
   title: string;
@@ -122,6 +177,7 @@ export interface Page {
     value: string;
   };
   nodes: CanvasNode[];
+  guides?: CanvasGuide[];
   transition?: PageTransition;
   audioNarration?: AudioNarration;
   notes?: string;
@@ -132,6 +188,7 @@ export interface CanvasComment {
   pageId: string;
   x: number;
   y: number;
+  nodeId?: string;
   author: string;
   text: string;
   createdAt: string;
@@ -174,14 +231,47 @@ export interface AssetItem {
   isCustom?: boolean;
 }
 
+export interface SavedCustomAsset {
+  id: string;
+  name: string;
+  category: 'shapes' | 'icons' | 'patterns' | 'text' | 'cards' | 'groups';
+  createdAt: string;
+  nodes: CanvasNode[];
+  width: number;
+  height: number;
+  tags?: string[];
+  description?: string;
+  isBuiltIn?: boolean;
+  accentColor?: string;
+  supportsBrandTheme?: boolean;
+}
+
+export interface DesignSpacingTokens {
+  slideMargin: number;
+  elementGap: number;
+  cardPadding: number;
+  borderRadius: number;
+}
+
+export interface DesignTypographyTokens {
+  headingSize: number;
+  subheadingSize: number;
+  bodySize: number;
+  lineHeight: number;
+}
+
 export interface GlobalTheme {
   primaryColor: string;
   secondaryColor: string;
   accentColor: string;
   backgroundColor: string;
+  surfaceColor?: string;
+  textColor?: string;
   fontFamily: string;
   headingFontFamily?: string;
   bodyFontFamily?: string;
+  typography?: DesignTypographyTokens;
+  spacing?: DesignSpacingTokens;
   logoUrl?: string;
   logoPosition?: 'top-left' | 'top-right' | 'bottom-right';
 }

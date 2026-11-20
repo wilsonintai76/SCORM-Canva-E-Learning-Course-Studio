@@ -12,11 +12,17 @@ import {
   BranchingConnection,
   AudioNarration,
   QuizNode,
+  SavedCustomAsset,
+  CanvasGuide,
 } from '../types/schema';
 import { CYBERSECURITY_COURSE } from '../data/templates';
 import { SlideLayout } from '../data/slideLayouts';
 import { DEFAULT_COURSE_VARIABLES } from '../utils/variableInterpolator';
 import { DEFAULT_ASSETS } from '../data/assetsData';
+import {
+  DEFAULT_RESOURCE_ASSETS,
+  applyBrandTokensToResourceNodes,
+} from '../data/resourceLibraryData';
 import {
   globalCommandManager,
   Command,
@@ -25,6 +31,8 @@ import {
   DeleteNodeCommand,
   UpdateNodeCommand,
 } from './commandManager';
+
+export const DEFAULT_MY_ASSETS: SavedCustomAsset[] = DEFAULT_RESOURCE_ASSETS;
 
 export interface CourseStoreState {
   course: CourseManifest;
@@ -50,8 +58,14 @@ export interface CourseStoreState {
   isMediaManagerOpen: boolean;
   isBranchingFlowOpen: boolean;
   isPdfModalOpen: boolean;
+  isCommandBarOpen: boolean;
+  activeInspectorTab: InspectorTab;
+  activeSidebarTab: SidebarTab;
+  lastSavedTime: number | null;
+  isSaving: boolean;
   activeCommentMode: boolean;
   showComments: boolean;
+  showVariablePreview: boolean;
   canUndo: boolean;
   canRedo: boolean;
   undoCount: number;
@@ -60,12 +74,37 @@ export interface CourseStoreState {
   lastRedoDescription?: string | null;
   versionHistory: VersionSnapshot[];
   assets: AssetItem[];
+  myAssets: SavedCustomAsset[];
 }
+
+export type InspectorTab =
+  | 'element'
+  | 'layers'
+  | 'animations'
+  | 'quiz_logic'
+  | 'slide'
+  | 'variables'
+  | 'tokens'
+  | 'course';
+
+export type SidebarTab =
+  | 'templates'
+  | 'layouts'
+  | 'components'
+  | 'resources'
+  | 'my_assets'
+  | 'elements'
+  | 'layers'
+  | 'assets'
+  | 'typography'
+  | 'quiz'
+  | 'theme'
+  | 'courses';
 
 // Global subscribers for lightweight store across React components
 type Listener = () => void;
 
-class CourseStore {
+export class CourseStore {
   private course: CourseManifest = JSON.parse(JSON.stringify(CYBERSECURITY_COURSE));
   private activePageIndex = 0;
   private selectedNodeId: string | null = null;
@@ -89,10 +128,18 @@ class CourseStore {
   private isMediaManagerOpen = false;
   private isBranchingFlowOpen = false;
   private isPdfModalOpen = false;
+  private isCommandBarOpen = false;
+  private activeInspectorTab: InspectorTab = 'element';
+  private activeSidebarTab: SidebarTab = 'templates';
+  private lastSavedTime: number | null = Date.now();
+  private isSaving = false;
+  private savingTimer: ReturnType<typeof setTimeout> | null = null;
   private activeCommentMode = false;
   private showComments = true;
+  private showVariablePreview = true;
   private versionHistory: VersionSnapshot[] = [];
   private assets: AssetItem[] = [...DEFAULT_ASSETS];
+  private myAssets: SavedCustomAsset[] = [...DEFAULT_MY_ASSETS];
 
   private pendingSnapshotCommand: CourseSnapshotCommand | null = null;
   private listeners: Set<Listener> = new Set();
@@ -126,7 +173,23 @@ class CourseStore {
         secondaryColor: '#4f46e5',
         accentColor: '#06b6d4',
         backgroundColor: '#0f172a',
+        surfaceColor: '#1e293b',
+        textColor: '#f8fafc',
         fontFamily: 'Inter, sans-serif',
+        headingFontFamily: 'Inter, sans-serif',
+        bodyFontFamily: 'Inter, sans-serif',
+        typography: {
+          headingSize: 32,
+          subheadingSize: 22,
+          bodySize: 16,
+          lineHeight: 1.4,
+        },
+        spacing: {
+          slideMargin: 40,
+          elementGap: 16,
+          cardPadding: 16,
+          borderRadius: 12,
+        },
       };
     }
     try {
@@ -148,6 +211,52 @@ class CourseStore {
       if (saved) {
         this.versionHistory = JSON.parse(saved);
       }
+      const savedMyAssets = localStorage.getItem('scorm_canva_my_assets');
+      if (savedMyAssets) {
+        const parsedAssets = JSON.parse(savedMyAssets);
+        if (Array.isArray(parsedAssets) && parsedAssets.length > 0) {
+          const existingIds = new Set(parsedAssets.map((a: SavedCustomAsset) => a.id));
+          const missingBuiltIns = DEFAULT_RESOURCE_ASSETS.filter((b) => !existingIds.has(b.id));
+          this.myAssets = [...parsedAssets, ...missingBuiltIns];
+        }
+      }
+      const savedSession = localStorage.getItem('scorm_canva_editor_session');
+      if (savedSession) {
+        const sessionObj = JSON.parse(savedSession);
+        if (sessionObj && typeof sessionObj.activePageIndex === 'number') {
+          this.activePageIndex = Math.max(
+            0,
+            Math.min(this.course.pages.length - 1, sessionObj.activePageIndex)
+          );
+        }
+        const activePage = this.course.pages[this.activePageIndex];
+        if (activePage && Array.isArray(sessionObj?.selectedNodeIds)) {
+          const validNodeIds = new Set(activePage.nodes.map((n) => n.id));
+          this.selectedNodeIds = sessionObj.selectedNodeIds.filter((id: unknown): id is string =>
+            typeof id === 'string' && validNodeIds.has(id)
+          );
+          if (typeof sessionObj.selectedNodeId === 'string' && validNodeIds.has(sessionObj.selectedNodeId)) {
+            this.selectedNodeId = sessionObj.selectedNodeId;
+          } else {
+            this.selectedNodeId = this.selectedNodeIds[0] || null;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  private persistSession(): void {
+    try {
+      localStorage.setItem(
+        'scorm_canva_editor_session',
+        JSON.stringify({
+          activePageIndex: this.activePageIndex,
+          selectedNodeId: this.selectedNodeId,
+          selectedNodeIds: this.selectedNodeIds,
+        })
+      );
     } catch {
       // ignore
     }
@@ -156,6 +265,14 @@ class CourseStore {
   private persistVersions(): void {
     try {
       localStorage.setItem('scorm_canva_versions', JSON.stringify(this.versionHistory));
+    } catch {
+      // ignore
+    }
+  }
+
+  private persistMyAssets(): void {
+    try {
+      localStorage.setItem('scorm_canva_my_assets', JSON.stringify(this.myAssets));
     } catch {
       // ignore
     }
@@ -173,18 +290,42 @@ class CourseStore {
     }
   }
 
+  public setIsCommandBarOpen(open: boolean): void {
+    this.isCommandBarOpen = open;
+    this.listeners.forEach((l) => l());
+  }
+
+  public setActiveInspectorTab(tab: InspectorTab): void {
+    this.activeInspectorTab = tab;
+    this.listeners.forEach((l) => l());
+  }
+
+  public setActiveSidebarTab(tab: SidebarTab): void {
+    this.activeSidebarTab = tab;
+    this.listeners.forEach((l) => l());
+  }
+
   private notify(shouldCommit = true): void {
     if (shouldCommit) {
       this.commitUndo();
     }
+    this.isSaving = true;
+    this.lastSavedTime = Date.now();
     try {
       localStorage.setItem('scorm_canva_course_state', JSON.stringify(this.course));
       if (this.course.theme) {
         localStorage.setItem('scorm_canva_global_theme', JSON.stringify(this.course.theme));
       }
+      this.persistSession();
     } catch {
       // ignore
     }
+    if (this.savingTimer) clearTimeout(this.savingTimer);
+    this.savingTimer = setTimeout(() => {
+      this.isSaving = false;
+      this.listeners.forEach((l) => l());
+    }, 450);
+
     this.listeners.forEach((l) => l());
   }
 
@@ -242,8 +383,14 @@ class CourseStore {
       isMediaManagerOpen: this.isMediaManagerOpen,
       isBranchingFlowOpen: this.isBranchingFlowOpen,
       isPdfModalOpen: this.isPdfModalOpen,
+      isCommandBarOpen: this.isCommandBarOpen,
+      activeInspectorTab: this.activeInspectorTab,
+      activeSidebarTab: this.activeSidebarTab,
+      lastSavedTime: this.lastSavedTime,
+      isSaving: this.isSaving,
       activeCommentMode: this.activeCommentMode,
       showComments: this.showComments,
+      showVariablePreview: this.showVariablePreview,
       canUndo: globalCommandManager.canUndo(),
       canRedo: globalCommandManager.canRedo(),
       undoCount: globalCommandManager.getUndoCount(),
@@ -252,6 +399,7 @@ class CourseStore {
       lastRedoDescription: globalCommandManager.getLastRedoDescription(),
       versionHistory: this.versionHistory,
       assets: this.assets,
+      myAssets: this.myAssets,
     };
   }
 
@@ -321,9 +469,126 @@ class CourseStore {
     this.notify();
   }
 
+  public addGuide(
+    orientation: 'horizontal' | 'vertical',
+    position: number,
+    pageIndex?: number
+  ): CanvasGuide {
+    const pageIdx = pageIndex !== undefined ? pageIndex : this.activePageIndex;
+    const page = this.course.pages[pageIdx];
+    if (!page) return { id: '', orientation, position };
+    if (!page.guides) page.guides = [];
+
+    this.pushUndo(`Add ${orientation} guide at ${Math.round(position)}px`);
+    const newGuide: CanvasGuide = {
+      id: 'guide_' + Math.random().toString(36).substring(2, 9),
+      orientation,
+      position: Math.round(position),
+      color: '#38bdf8',
+    };
+    page.guides.push(newGuide);
+    this.notify();
+    return newGuide;
+  }
+
+  public updateGuide(id: string, position: number, pageIndex?: number): void {
+    const pageIdx = pageIndex !== undefined ? pageIndex : this.activePageIndex;
+    const page = this.course.pages[pageIdx];
+    if (!page?.guides) return;
+    const guide = page.guides.find((g) => g.id === id);
+    if (!guide || guide.isLocked) return;
+
+    guide.position = Math.round(position);
+    this.notify();
+  }
+
+  public deleteGuide(id: string, pageIndex?: number): void {
+    const pageIdx = pageIndex !== undefined ? pageIndex : this.activePageIndex;
+    const page = this.course.pages[pageIdx];
+    if (!page?.guides) return;
+
+    this.pushUndo('Delete guide');
+    page.guides = page.guides.filter((g) => g.id !== id);
+    this.notify();
+  }
+
+  public clearAllGuides(pageIndex?: number): void {
+    const pageIdx = pageIndex !== undefined ? pageIndex : this.activePageIndex;
+    const page = this.course.pages[pageIdx];
+    if (!page?.guides || page.guides.length === 0) return;
+
+    this.pushUndo('Clear all guides');
+    page.guides = [];
+    this.notify();
+  }
+
+  public toggleLockGuide(id: string, pageIndex?: number): void {
+    const pageIdx = pageIndex !== undefined ? pageIndex : this.activePageIndex;
+    const page = this.course.pages[pageIdx];
+    if (!page?.guides) return;
+    const guide = page.guides.find((g) => g.id === id);
+    if (!guide) return;
+
+    guide.isLocked = !guide.isLocked;
+    this.notify();
+  }
+
+  public addPresetGuides(
+    type: 'margins' | 'safe-margins' | 'center' | 'thirds' | 'rule-of-thirds' | 'quads',
+    pageIndex?: number
+  ): void {
+    const pageIdx = pageIndex !== undefined ? pageIndex : this.activePageIndex;
+    const page = this.course.pages[pageIdx];
+    if (!page) return;
+    if (!page.guides) page.guides = [];
+
+    this.pushUndo(`Add ${type} preset guides`);
+    const w = this.course.canvasWidth || 960;
+    const h = this.course.canvasHeight || 540;
+
+    const newGuides: CanvasGuide[] = [];
+    if (type === 'margins' || type === 'safe-margins') {
+      newGuides.push(
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: 40 },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: w - 40 },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: 40 },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: h - 40 }
+      );
+    } else if (type === 'center') {
+      newGuides.push(
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: Math.round(w / 2) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: Math.round(h / 2) }
+      );
+    } else if (type === 'thirds' || type === 'rule-of-thirds') {
+      newGuides.push(
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: Math.round(w / 3) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: Math.round((w * 2) / 3) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: Math.round(h / 3) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: Math.round((h * 2) / 3) }
+      );
+    } else if (type === 'quads') {
+      newGuides.push(
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: Math.round(w / 4) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: Math.round(w / 2) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'vertical', position: Math.round((w * 3) / 4) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: Math.round(h / 4) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: Math.round(h / 2) },
+        { id: 'g_' + Math.random().toString(36).substring(2, 9), orientation: 'horizontal', position: Math.round((h * 3) / 4) }
+      );
+    }
+
+    page.guides.push(...newGuides);
+    this.notify();
+  }
+
   public setGridColor(color: string): void {
     this.gridColor = color;
     this.notify();
+  }
+
+  public setShowVariablePreview(show: boolean): void {
+    this.showVariablePreview = show;
+    this.listeners.forEach((l) => l());
   }
 
   public applyGlobalTheme(
@@ -331,14 +596,36 @@ class CourseStore {
     options?: {
       applyBackgroundToPages?: boolean;
       applyLogoToPages?: boolean;
+      applyTypographyToPages?: boolean;
+      applySpacingToPages?: boolean;
+      recordHistory?: boolean;
     }
   ): void {
-    this.pushUndo();
-    this.course.theme = { ...theme };
+    if (options?.recordHistory !== false) {
+      this.pushUndo('Apply design tokens across slides');
+    }
+    this.course.theme = {
+      ...theme,
+      typography: {
+        headingSize: theme.typography?.headingSize ?? 32,
+        subheadingSize: theme.typography?.subheadingSize ?? 22,
+        bodySize: theme.typography?.bodySize ?? 16,
+        lineHeight: theme.typography?.lineHeight ?? 1.4,
+      },
+      spacing: {
+        slideMargin: theme.spacing?.slideMargin ?? 40,
+        elementGap: theme.spacing?.elementGap ?? 16,
+        cardPadding: theme.spacing?.cardPadding ?? 16,
+        borderRadius: theme.spacing?.borderRadius ?? 12,
+      },
+    };
 
     const headingFont = theme.headingFontFamily || theme.fontFamily || 'Inter, sans-serif';
     const bodyFont = theme.bodyFontFamily || theme.fontFamily || 'Inter, sans-serif';
     const logoPos = theme.logoPosition || 'top-left';
+    const margin = this.course.theme.spacing?.slideMargin ?? 40;
+    const radius = this.course.theme.spacing?.borderRadius ?? 12;
+    const padding = this.course.theme.spacing?.cardPadding ?? 16;
 
     // Helper to calculate luminance of background hex
     const isDarkBg = (hex?: string) => {
@@ -352,6 +639,8 @@ class CourseStore {
 
     const targetBg = theme.backgroundColor;
     const shouldUpdateBg = options?.applyBackgroundToPages ?? true;
+    const shouldUpdateTypography = options?.applyTypographyToPages ?? true;
+    const shouldUpdateSpacing = options?.applySpacingToPages ?? true;
     const darkTheme = targetBg ? isDarkBg(targetBg) : false;
 
     this.course.pages.forEach((page) => {
@@ -367,12 +656,36 @@ class CourseStore {
       page.nodes.forEach((node) => {
         if (node.type === 'text') {
           const isHeading =
-            node.fontSize >= 22 || node.fontWeight === 'bold' || node.fontWeight === 'black';
-          node.fontFamily = isHeading ? headingFont : bodyFont;
+            node.fontSize >= 24 || node.fontWeight === 'bold' || node.fontWeight === 'black';
+          const isSubheading = !isHeading && node.fontSize >= 19;
+          node.fontFamily = isHeading || isSubheading ? headingFont : bodyFont;
 
-          // Automatically sync text contrast if background was updated
+          if (shouldUpdateTypography && this.course.theme?.typography) {
+            if (isHeading) {
+              node.fontSize = this.course.theme.typography.headingSize;
+            } else if (isSubheading) {
+              node.fontSize = this.course.theme.typography.subheadingSize;
+            } else {
+              node.fontSize = this.course.theme.typography.bodySize;
+            }
+            node.lineHeight = this.course.theme.typography.lineHeight;
+          }
+
+          if (shouldUpdateSpacing && node.backgroundColor && node.backgroundColor !== 'transparent') {
+            node.borderRadius = radius;
+            node.padding = padding;
+          }
+
+          // Automatically sync text contrast or explicit textColor token
           if (shouldUpdateBg && targetBg) {
-            if (darkTheme) {
+            if (
+              theme.textColor &&
+              ['#0f172a', '#000000', '#1e293b', '#334155', '#111827', '#ffffff', '#f8fafc', '#f1f5f9', '#e2e8f0'].includes(
+                node.color.toLowerCase()
+              )
+            ) {
+              node.color = theme.textColor;
+            } else if (darkTheme) {
               if (
                 ['#0f172a', '#000000', '#1e293b', '#334155', '#111827'].includes(
                   node.color.toLowerCase()
@@ -395,13 +708,20 @@ class CourseStore {
             node.fill &&
             !['#ffffff', '#000000', 'transparent'].includes(node.fill.toLowerCase())
           ) {
-            node.fill = theme.primaryColor;
+            node.fill = node.height > 120 && theme.surfaceColor ? theme.surfaceColor : theme.primaryColor;
           }
           if (
             node.stroke &&
             !['#ffffff', '#000000', 'transparent'].includes(node.stroke.toLowerCase())
           ) {
             node.stroke = theme.accentColor;
+          }
+          if (shouldUpdateSpacing && node.shapeType === 'rounded-rect' && (node.borderRadius ?? 0) < 999) {
+            node.borderRadius = radius;
+          }
+        } else if (node.type === 'image') {
+          if (shouldUpdateSpacing && (node.borderRadius ?? 0) < 999) {
+            node.borderRadius = radius;
           }
         } else if (node.type === 'quiz') {
           node.themeColor = theme.primaryColor;
@@ -414,14 +734,14 @@ class CourseStore {
           (n) => n.type === 'image' && (n.id.startsWith('logo_') || (n as any).alt === 'Brand Logo')
         );
 
-        let logoX = 40;
-        let logoY = 30;
+        let logoX = margin;
+        let logoY = Math.max(20, Math.round(margin * 0.75));
         if (logoPos === 'top-right') {
-          logoX = (page.width || 960) - 160;
-          logoY = 30;
+          logoX = (page.width || 960) - 120 - margin;
+          logoY = Math.max(20, Math.round(margin * 0.75));
         } else if (logoPos === 'bottom-right') {
-          logoX = (page.width || 960) - 160;
-          logoY = (page.height || 540) - 60;
+          logoX = (page.width || 960) - 120 - margin;
+          logoY = (page.height || 540) - 40 - Math.max(20, Math.round(margin * 0.75));
         }
 
         if (existingLogo) {
@@ -440,7 +760,7 @@ class CourseStore {
             url: theme.logoUrl,
             alt: 'Brand Logo',
             objectFit: 'contain',
-            borderRadius: 4,
+            borderRadius: Math.min(8, radius),
             opacity: 0.95,
             zIndex: maxZ,
           });
@@ -612,6 +932,21 @@ class CourseStore {
     this.notify();
   }
 
+  public updateVariableValue(idOrName: string, value: string | number | boolean, mode: 'add' | 'set' = 'set'): void {
+    if (!this.course.variables) return;
+    const target = this.course.variables.find((v) => v.id === idOrName || v.name === idOrName);
+    if (!target) return;
+
+    let nextVal = String(value);
+    if (mode === 'add' && target.type === 'number') {
+      const current = parseFloat(target.currentValue || target.defaultValue || '0') || 0;
+      const toAdd = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
+      nextVal = String(current + toAdd);
+    }
+    target.currentValue = nextVal;
+    this.notify();
+  }
+
   public saveVersion(name?: string, note?: string): VersionSnapshot {
     const nodeCount = this.course.pages.reduce((acc, p) => acc + p.nodes.length, 0);
     const snapshot: VersionSnapshot = {
@@ -687,6 +1022,188 @@ class CourseStore {
       return { ...asset, name: newName };
     });
     this.notify();
+  }
+
+  public saveSelectionToMyAssets(
+    name: string,
+    category?: SavedCustomAsset['category'],
+    targetNodeIds?: string[],
+    metadata?: { tags?: string[]; description?: string }
+  ): SavedCustomAsset | null {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return null;
+
+    const ids =
+      targetNodeIds ||
+      (this.selectedNodeIds.length > 0
+        ? this.selectedNodeIds
+        : this.selectedNodeId
+        ? [this.selectedNodeId]
+        : []);
+    if (ids.length === 0) return null;
+
+    const nodesToSave = page.nodes.filter((n) => ids.includes(n.id));
+    if (nodesToSave.length === 0) return null;
+
+    const minX = Math.min(...nodesToSave.map((n) => n.x));
+    const minY = Math.min(...nodesToSave.map((n) => n.y));
+    const maxX = Math.max(...nodesToSave.map((n) => n.x + n.width));
+    const maxY = Math.max(...nodesToSave.map((n) => n.y + n.height));
+
+    const width = Math.max(20, maxX - minX);
+    const height = Math.max(20, maxY - minY);
+
+    // Normalize coordinates relative to top-left of the bounding box
+    const normalizedNodes: CanvasNode[] = nodesToSave.map((node) => {
+      const clone = JSON.parse(JSON.stringify(node));
+      clone.x = node.x - minX;
+      clone.y = node.y - minY;
+      return clone;
+    });
+
+    let autoCategory: SavedCustomAsset['category'] = 'cards';
+    if (category) {
+      autoCategory = category;
+    } else if (normalizedNodes.some((n) => n.type === 'quiz' || Boolean(n.animation))) {
+      autoCategory = 'patterns';
+    } else if (normalizedNodes.length > 1) {
+      autoCategory = 'groups';
+    } else {
+      const type = normalizedNodes[0].type;
+      if (type === 'shape') autoCategory = 'shapes';
+      else if (type === 'text') autoCategory = 'text';
+      else if (type === 'image') autoCategory = 'icons';
+      else if (type === 'callout') autoCategory = 'cards';
+      else autoCategory = 'groups';
+    }
+
+    const customTags = metadata?.tags?.filter(Boolean) || [];
+    const defaultTags = [autoCategory, normalizedNodes.length > 1 ? 'group' : normalizedNodes[0].type];
+    const mergedTags = Array.from(new Set([...customTags, ...defaultTags]));
+
+    const newAsset: SavedCustomAsset = {
+      id: 'myasset_' + Math.random().toString(36).substring(2, 9),
+      name: name.trim() || 'Custom Saved Resource',
+      category: autoCategory,
+      createdAt: new Date().toISOString(),
+      width,
+      height,
+      tags: mergedTags,
+      description:
+        metadata?.description?.trim() ||
+        `${normalizedNodes.length} element${normalizedNodes.length > 1 ? 's' : ''} saved from canvas`,
+      isBuiltIn: false,
+      nodes: normalizedNodes,
+    };
+
+    this.myAssets.unshift(newAsset);
+    this.persistMyAssets();
+    this.notify();
+    return newAsset;
+  }
+
+  public deleteMyAsset(id: string): void {
+    this.myAssets = this.myAssets.filter((a) => a.id !== id);
+    this.persistMyAssets();
+    this.notify();
+  }
+
+  public renameMyAsset(id: string, newName: string): void {
+    const asset = this.myAssets.find((a) => a.id === id);
+    if (asset && newName.trim()) {
+      asset.name = newName.trim();
+      this.persistMyAssets();
+      this.notify();
+    }
+  }
+
+  public duplicateMyAsset(id: string): SavedCustomAsset | null {
+    const asset = this.myAssets.find((a) => a.id === id);
+    if (!asset) return null;
+    const clone: SavedCustomAsset = JSON.parse(JSON.stringify(asset));
+    clone.id = 'myasset_' + Math.random().toString(36).substring(2, 9);
+    clone.name = `${asset.name} (Copy)`;
+    clone.createdAt = new Date().toISOString();
+    clone.isBuiltIn = false;
+    this.myAssets.unshift(clone);
+    this.persistMyAssets();
+    this.notify();
+    return clone;
+  }
+
+  public importResourcePack(items: SavedCustomAsset[]): number {
+    if (!Array.isArray(items) || items.length === 0) return 0;
+    const valid = items.filter((item) => item && item.name && Array.isArray(item.nodes) && item.nodes.length > 0);
+    if (valid.length === 0) return 0;
+    const existingIds = new Set(this.myAssets.map((a) => a.id));
+    const prepared = valid.map((item) => ({
+      ...item,
+      id: existingIds.has(item.id)
+        ? 'myasset_' + Math.random().toString(36).substring(2, 9)
+        : item.id,
+      isBuiltIn: false,
+      createdAt: item.createdAt || new Date().toISOString(),
+    }));
+    this.myAssets = [...prepared, ...this.myAssets];
+    this.persistMyAssets();
+    this.notify();
+    return prepared.length;
+  }
+
+  public addMyAssetToCanvas(
+    assetId: string,
+    position?: { x: number; y: number },
+    options?: { applyBrandTheme?: boolean }
+  ): CanvasNode[] {
+    const asset = this.myAssets.find((a) => a.id === assetId);
+    if (!asset || asset.nodes.length === 0) return [];
+
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return [];
+
+    this.pushUndo(`Insert ${asset.name} from Resource Library`);
+
+    const cW = this.course.canvasWidth || 960;
+    const cH = this.course.canvasHeight || 540;
+
+    let dropX =
+      position?.x !== undefined
+        ? Math.round(position.x - asset.width / 2)
+        : Math.round((cW - asset.width) / 2);
+    let dropY =
+      position?.y !== undefined
+        ? Math.round(position.y - asset.height / 2)
+        : Math.round((cH - asset.height) / 2);
+
+    dropX = Math.max(10, Math.min(cW - 30, dropX));
+    dropY = Math.max(10, Math.min(cH - 30, dropY));
+
+    const maxZ = page.nodes.reduce((m, n) => Math.max(m, n.zIndex || 0), 0);
+    const newGroupId =
+      asset.nodes.length > 1 ? 'group_' + Math.random().toString(36).substring(2, 9) : undefined;
+
+    const sourceNodes =
+      options?.applyBrandTheme && this.course.theme
+        ? applyBrandTokensToResourceNodes(asset.nodes, this.course.theme)
+        : asset.nodes;
+
+    const instantiatedNodes: CanvasNode[] = sourceNodes.map((tpl, idx) => {
+      const clone: CanvasNode = JSON.parse(JSON.stringify(tpl));
+      clone.id = `${tpl.type}_${Math.random().toString(36).substring(2, 9)}_${idx}`;
+      clone.x = dropX + tpl.x;
+      clone.y = dropY + tpl.y;
+      clone.zIndex = maxZ + idx + 1;
+      if (newGroupId) {
+        clone.groupId = newGroupId;
+      }
+      return clone;
+    });
+
+    page.nodes.push(...instantiatedNodes);
+    this.selectedNodeIds = instantiatedNodes.map((n) => n.id);
+    this.selectedNodeId = instantiatedNodes[0]?.id || null;
+    this.notify();
+    return instantiatedNodes;
   }
 
   public exportProjectJson(): string {
@@ -766,6 +1283,7 @@ class CourseStore {
     if (index >= 0 && index < this.course.pages.length) {
       this.activePageIndex = index;
       this.selectedNodeId = null;
+      this.selectedNodeIds = [];
       this.notify();
     }
   }
@@ -820,6 +1338,66 @@ class CourseStore {
     this.notify();
   }
 
+  public selectAllNodesOnSlide(): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+    const ids = page.nodes.filter((n) => !n.isHidden).map((n) => n.id);
+    this.selectedNodeIds = ids;
+    this.selectedNodeId = ids[0] || null;
+    this.notify();
+  }
+
+  public invertSelectionOnSlide(): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+    const currentSet = new Set(this.selectedNodeIds);
+    const inverted = page.nodes
+      .filter((n) => !n.isHidden && !currentSet.has(n.id))
+      .map((n) => n.id);
+    this.selectedNodeIds = inverted;
+    this.selectedNodeId = inverted[0] || null;
+    this.notify();
+  }
+
+  public selectGroupMembers(groupId: string): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page || !groupId) return;
+    const ids = page.nodes.filter((n) => n.groupId === groupId).map((n) => n.id);
+    if (ids.length === 0) return;
+    this.selectedNodeIds = ids;
+    this.selectedNodeId = ids[0];
+    this.notify();
+  }
+
+  public setPrimarySelectedNode(nodeId: string): void {
+    if (!this.selectedNodeIds.includes(nodeId)) {
+      this.selectedNodeIds = [nodeId, ...this.selectedNodeIds];
+    } else {
+      this.selectedNodeIds = [nodeId, ...this.selectedNodeIds.filter((id) => id !== nodeId)];
+    }
+    this.selectedNodeId = nodeId;
+    this.notify();
+  }
+
+  public deleteSelectedNodes(): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+    const ids =
+      this.selectedNodeIds.length > 0
+        ? this.selectedNodeIds
+        : this.selectedNodeId
+        ? [this.selectedNodeId]
+        : [];
+    if (ids.length === 0) return;
+
+    this.pushUndo(`Delete ${ids.length} selected element${ids.length > 1 ? 's' : ''}`);
+    const idSet = new Set(ids);
+    page.nodes = page.nodes.filter((n) => !idSet.has(n.id));
+    this.selectedNodeIds = [];
+    this.selectedNodeId = null;
+    this.notify();
+  }
+
   public setSnapToGrid(enabled: boolean): void {
     this.isSnapToGridEnabled = enabled;
     this.notify();
@@ -871,6 +1449,96 @@ class CourseStore {
       });
     }
     this.notify();
+  }
+
+  public transformGroup(
+    groupIdOrNodeIds: string | string[],
+    newBounds: { x: number; y: number; width: number; height: number },
+    initialBounds: { x: number; y: number; width: number; height: number },
+    recordHistory = true
+  ): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+
+    let targetNodes: CanvasNode[] = [];
+    if (typeof groupIdOrNodeIds === 'string') {
+      targetNodes = page.nodes.filter((n) => n.groupId === groupIdOrNodeIds);
+    } else {
+      targetNodes = page.nodes.filter((n) => groupIdOrNodeIds.includes(n.id));
+    }
+
+    if (targetNodes.length === 0) return;
+
+    if (recordHistory) {
+      this.pushUndo('Transform group');
+    }
+
+    const initW = Math.max(1, initialBounds.width);
+    const initH = Math.max(1, initialBounds.height);
+    const newW = Math.max(20, newBounds.width);
+    const newH = Math.max(20, newBounds.height);
+
+    const scaleX = newW / initW;
+    const scaleY = newH / initH;
+    const uniformScale = Math.min(scaleX, scaleY);
+
+    targetNodes.forEach((node) => {
+      if (node.isLocked) return;
+
+      const relX = (node.x - initialBounds.x) / initW;
+      const relY = (node.y - initialBounds.y) / initH;
+      const relW = node.width / initW;
+      const relH = node.height / initH;
+
+      node.x = Math.round(newBounds.x + relX * newW);
+      node.y = Math.round(newBounds.y + relY * newH);
+      node.width = Math.max(16, Math.round(relW * newW));
+      node.height = Math.max(16, Math.round(relH * newH));
+
+      if (node.type === 'text') {
+        const textNode = node as any;
+        const currentFontSize = textNode.fontSize || 16;
+        textNode.fontSize = Math.max(8, Math.min(120, Math.round(currentFontSize * uniformScale)));
+      }
+    });
+
+    this.notify(recordHistory);
+  }
+
+  public scaleGroup(groupIdOrNodeIds: string | string[], scaleMultiplier: number): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+
+    let targetNodes: CanvasNode[] = [];
+    if (typeof groupIdOrNodeIds === 'string') {
+      targetNodes = page.nodes.filter((n) => n.groupId === groupIdOrNodeIds && !n.isLocked);
+    } else {
+      targetNodes = page.nodes.filter((n) => groupIdOrNodeIds.includes(n.id) && !n.isLocked);
+    }
+    if (targetNodes.length === 0) return;
+
+    const minX = Math.min(...targetNodes.map((n) => n.x));
+    const minY = Math.min(...targetNodes.map((n) => n.y));
+    const maxX = Math.max(...targetNodes.map((n) => n.x + n.width));
+    const maxY = Math.max(...targetNodes.map((n) => n.y + n.height));
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+
+    const newWidth = Math.round(width * scaleMultiplier);
+    const newHeight = Math.round(height * scaleMultiplier);
+    const centerX = minX + width / 2;
+    const centerY = minY + height / 2;
+
+    const newX = Math.round(centerX - newWidth / 2);
+    const newY = Math.round(centerY - newHeight / 2);
+
+    this.transformGroup(
+      targetNodes.map((n) => n.id),
+      { x: newX, y: newY, width: newWidth, height: newHeight },
+      { x: minX, y: minY, width, height },
+      true
+    );
   }
 
   public setZoom(zoom: number): void {
@@ -1018,12 +1686,14 @@ class CourseStore {
     this.notify();
   }
 
-  public updateActivePage(updates: Partial<Page>): void {
+  public updateActivePage(updates: Partial<Page>, recordHistory = true): void {
     const page = this.course.pages[this.activePageIndex];
     if (!page) return;
-    this.pushUndo();
+    if (recordHistory) {
+      this.pushUndo('Update slide properties');
+    }
     this.course.pages[this.activePageIndex] = { ...page, ...updates };
-    this.notify();
+    this.notify(recordHistory);
   }
 
   public addNode(
@@ -1246,8 +1916,23 @@ class CourseStore {
     if (recordHistory) {
       this.pushUndo();
     }
-    page.nodes[nodeIdx] = { ...page.nodes[nodeIdx], ...updates } as CanvasNode;
-    this.notify();
+
+    const sanitizedUpdates: Partial<CanvasNode> = { ...updates };
+    if (typeof sanitizedUpdates.x === 'number' && Number.isFinite(sanitizedUpdates.x)) {
+      sanitizedUpdates.x = Math.round(sanitizedUpdates.x);
+    }
+    if (typeof sanitizedUpdates.y === 'number' && Number.isFinite(sanitizedUpdates.y)) {
+      sanitizedUpdates.y = Math.round(sanitizedUpdates.y);
+    }
+    if (typeof sanitizedUpdates.width === 'number' && Number.isFinite(sanitizedUpdates.width)) {
+      sanitizedUpdates.width = Math.max(10, Math.round(sanitizedUpdates.width));
+    }
+    if (typeof sanitizedUpdates.height === 'number' && Number.isFinite(sanitizedUpdates.height)) {
+      sanitizedUpdates.height = Math.max(10, Math.round(sanitizedUpdates.height));
+    }
+
+    page.nodes[nodeIdx] = { ...page.nodes[nodeIdx], ...sanitizedUpdates } as CanvasNode;
+    this.notify(recordHistory);
   }
 
   public deleteNode(nodeId: string): void {
@@ -1258,8 +1943,9 @@ class CourseStore {
 
     this.pushUndo();
     page.nodes.splice(nodeIdx, 1);
+    this.selectedNodeIds = this.selectedNodeIds.filter((id) => id !== nodeId);
     if (this.selectedNodeId === nodeId) {
-      this.selectedNodeId = null;
+      this.selectedNodeId = this.selectedNodeIds[0] || null;
     }
     this.notify();
   }
@@ -1288,10 +1974,14 @@ class CourseStore {
     if (!page) return;
     const node = page.nodes.find((n) => n.id === nodeId);
     if (!node) return;
+    const otherNodes = page.nodes.filter((n) => n.id !== nodeId);
+    if (otherNodes.length === 0) return;
 
-    this.pushUndo();
-    const maxZ = page.nodes.reduce((m, n) => Math.max(m, n.zIndex || 0), 0);
-    node.zIndex = maxZ + 1;
+    this.pushUndo('Bring element to front');
+    const maxOtherZ = otherNodes.reduce((m, n) => Math.max(m, n.zIndex ?? 1), 0);
+    if ((node.zIndex ?? 1) <= maxOtherZ) {
+      node.zIndex = maxOtherZ + 1;
+    }
     this.notify();
   }
 
@@ -1300,10 +1990,20 @@ class CourseStore {
     if (!page) return;
     const node = page.nodes.find((n) => n.id === nodeId);
     if (!node) return;
+    const otherNodes = page.nodes.filter((n) => n.id !== nodeId);
+    if (otherNodes.length === 0) return;
 
-    this.pushUndo();
-    const minZ = page.nodes.reduce((m, n) => Math.min(m, n.zIndex || 0), 1);
-    node.zIndex = Math.max(0, minZ - 1);
+    this.pushUndo('Send element to back');
+    const minOtherZ = otherNodes.reduce((m, n) => Math.min(m, n.zIndex ?? 1), Infinity);
+    if (minOtherZ <= 0) {
+      const shift = 1 - minOtherZ;
+      otherNodes.forEach((other) => {
+        other.zIndex = (other.zIndex ?? 1) + shift;
+      });
+      node.zIndex = 0;
+    } else if ((node.zIndex ?? 1) >= minOtherZ) {
+      node.zIndex = minOtherZ - 1;
+    }
     this.notify();
   }
 
@@ -1313,8 +2013,8 @@ class CourseStore {
     const node = page.nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
-    this.pushUndo();
-    node.zIndex = (node.zIndex || 1) + 1;
+    this.pushUndo('Bring element forward');
+    node.zIndex = (node.zIndex ?? 1) + 1;
     this.notify();
   }
 
@@ -1324,8 +2024,22 @@ class CourseStore {
     const node = page.nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
-    this.pushUndo();
-    node.zIndex = Math.max(0, (node.zIndex || 1) - 1);
+    this.pushUndo('Send element backward');
+    const currentZ = node.zIndex ?? 1;
+    if (currentZ > 0) {
+      node.zIndex = currentZ - 1;
+    } else {
+      const otherNodes = page.nodes.filter((n) => n.id !== nodeId);
+      const hasSameOrLower = otherNodes.some((n) => (n.zIndex ?? 1) <= 0);
+      if (hasSameOrLower) {
+        otherNodes.forEach((other) => {
+          if ((other.zIndex ?? 1) <= 0) {
+            other.zIndex = (other.zIndex ?? 1) + 1;
+          }
+        });
+      }
+      node.zIndex = 0;
+    }
     this.notify();
   }
 
@@ -1499,6 +2213,70 @@ class CourseStore {
 
     this.notify();
   }
+
+  public alignSelectedToMargins(edge: 'left' | 'right' | 'top' | 'bottom'): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+    const ids =
+      this.selectedNodeIds.length > 0
+        ? this.selectedNodeIds
+        : this.selectedNodeId
+        ? [this.selectedNodeId]
+        : [];
+    if (ids.length === 0) return;
+
+    const nodes = page.nodes.filter((n) => ids.includes(n.id) && !n.isLocked);
+    if (nodes.length === 0) return;
+
+    const margin = this.course.theme?.spacing?.slideMargin ?? 40;
+    const cW = this.course.canvasWidth || 960;
+    const cH = this.course.canvasHeight || 540;
+
+    this.pushUndo(`Align selected to ${edge} slide margin`);
+    nodes.forEach((node) => {
+      if (edge === 'left') node.x = margin;
+      else if (edge === 'right') node.x = Math.max(0, cW - margin - node.width);
+      else if (edge === 'top') node.y = margin;
+      else if (edge === 'bottom') node.y = Math.max(0, cH - margin - node.height);
+    });
+    this.notify();
+  }
+
+  public spaceNodesEvenly(
+    axis: 'horizontal' | 'vertical',
+    gapPx: number,
+    targetIds?: string[]
+  ): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+
+    const ids = targetIds || this.selectedNodeIds;
+    if (ids.length < 2) return;
+
+    const nodes = page.nodes.filter((n) => ids.includes(n.id) && !n.isLocked);
+    if (nodes.length < 2) return;
+
+    const safeGap = Math.max(0, Math.round(gapPx));
+    this.pushUndo(`Space ${nodes.length} elements evenly (${safeGap}px ${axis})`);
+
+    if (axis === 'horizontal') {
+      const sorted = [...nodes].sort((a, b) => a.x - b.x);
+      let cursorX = sorted[0].x + sorted[0].width + safeGap;
+      for (let i = 1; i < sorted.length; i++) {
+        sorted[i].x = Math.round(cursorX);
+        cursorX += sorted[i].width + safeGap;
+      }
+    } else {
+      const sorted = [...nodes].sort((a, b) => a.y - b.y);
+      let cursorY = sorted[0].y + sorted[0].height + safeGap;
+      for (let i = 1; i < sorted.length; i++) {
+        sorted[i].y = Math.round(cursorY);
+        cursorY += sorted[i].height + safeGap;
+      }
+    }
+
+    this.notify();
+  }
 }
 
 export const globalCourseStore = new CourseStore();
@@ -1527,10 +2305,38 @@ export function useCourseStore() {
     setSelectedNodeId: (id: string | null) => globalCourseStore.setSelectedNodeId(id),
     setSelectedNodeIds: (ids: string[] | null) => globalCourseStore.setSelectedNodeIds(ids),
     toggleNodeSelection: (id: string) => globalCourseStore.toggleNodeSelection(id),
+    selectAllNodesOnSlide: () => globalCourseStore.selectAllNodesOnSlide(),
+    invertSelectionOnSlide: () => globalCourseStore.invertSelectionOnSlide(),
+    selectGroupMembers: (groupId: string) => globalCourseStore.selectGroupMembers(groupId),
+    setPrimarySelectedNode: (nodeId: string) => globalCourseStore.setPrimarySelectedNode(nodeId),
+    deleteSelectedNodes: () => globalCourseStore.deleteSelectedNodes(),
     setSnapToGrid: (enabled: boolean) => globalCourseStore.setSnapToGrid(enabled),
     setGridSize: (size: number) => globalCourseStore.setGridSize(size),
     groupNodes: (ids?: string[]) => globalCourseStore.groupNodes(ids),
     ungroupNodes: (groupId?: string) => globalCourseStore.ungroupNodes(groupId),
+    transformGroup: (
+      groupIdOrNodeIds: string | string[],
+      newBounds: { x: number; y: number; width: number; height: number },
+      initialBounds: { x: number; y: number; width: number; height: number },
+      recordHistory = true
+    ) => globalCourseStore.transformGroup(groupIdOrNodeIds, newBounds, initialBounds, recordHistory),
+    scaleGroup: (groupIdOrNodeIds: string | string[], scaleMultiplier: number) =>
+      globalCourseStore.scaleGroup(groupIdOrNodeIds, scaleMultiplier),
+    saveSelectionToMyAssets: (
+      name: string,
+      category?: SavedCustomAsset['category'],
+      targetNodeIds?: string[],
+      metadata?: { tags?: string[]; description?: string }
+    ) => globalCourseStore.saveSelectionToMyAssets(name, category, targetNodeIds, metadata),
+    deleteMyAsset: (id: string) => globalCourseStore.deleteMyAsset(id),
+    renameMyAsset: (id: string, newName: string) => globalCourseStore.renameMyAsset(id, newName),
+    duplicateMyAsset: (id: string) => globalCourseStore.duplicateMyAsset(id),
+    importResourcePack: (items: SavedCustomAsset[]) => globalCourseStore.importResourcePack(items),
+    addMyAssetToCanvas: (
+      assetId: string,
+      position?: { x: number; y: number },
+      options?: { applyBrandTheme?: boolean }
+    ) => globalCourseStore.addMyAssetToCanvas(assetId, position, options),
     toggleLockNode: (nodeId?: string) => globalCourseStore.toggleLockNode(nodeId),
     toggleHideNode: (nodeId?: string) => globalCourseStore.toggleHideNode(nodeId),
     reorderLayerNodes: (orderedIdsFromTopToBottom: string[]) =>
@@ -1556,13 +2362,42 @@ export function useCourseStore() {
       globalCourseStore.setIsBranchingFlowOpen(open),
     setIsPdfModalOpen: (open: boolean) =>
       globalCourseStore.setIsPdfModalOpen(open),
+    setIsCommandBarOpen: (open: boolean) =>
+      globalCourseStore.setIsCommandBarOpen(open),
+    setActiveInspectorTab: (tab: InspectorTab) =>
+      globalCourseStore.setActiveInspectorTab(tab),
+    setActiveSidebarTab: (tab: SidebarTab) =>
+      globalCourseStore.setActiveSidebarTab(tab),
     setShowRulers: (show: boolean) => globalCourseStore.setShowRulers(show),
     setShowGuides: (show: boolean) => globalCourseStore.setShowGuides(show),
+    addGuide: (
+      orientation: 'horizontal' | 'vertical',
+      position: number,
+      pageIndex?: number
+    ) => globalCourseStore.addGuide(orientation, position, pageIndex),
+    updateGuide: (id: string, position: number, pageIndex?: number) =>
+      globalCourseStore.updateGuide(id, position, pageIndex),
+    deleteGuide: (id: string, pageIndex?: number) =>
+      globalCourseStore.deleteGuide(id, pageIndex),
+    clearAllGuides: (pageIndex?: number) => globalCourseStore.clearAllGuides(pageIndex),
+    toggleLockGuide: (id: string, pageIndex?: number) =>
+      globalCourseStore.toggleLockGuide(id, pageIndex),
+    addPresetGuides: (
+      type: 'margins' | 'safe-margins' | 'center' | 'thirds' | 'rule-of-thirds' | 'quads',
+      pageIndex?: number
+    ) => globalCourseStore.addPresetGuides(type, pageIndex),
     setGridColor: (color: string) => globalCourseStore.setGridColor(color),
     applyGlobalTheme: (
       theme: GlobalTheme,
-      options?: { applyBackgroundToPages?: boolean; applyLogoToPages?: boolean }
+      options?: {
+        applyBackgroundToPages?: boolean;
+        applyLogoToPages?: boolean;
+        applyTypographyToPages?: boolean;
+        applySpacingToPages?: boolean;
+        recordHistory?: boolean;
+      }
     ) => globalCourseStore.applyGlobalTheme(theme, options),
+    setShowVariablePreview: (show: boolean) => globalCourseStore.setShowVariablePreview(show),
     setSlideAudioNarration: (pageId: string, narration?: AudioNarration) =>
       globalCourseStore.setSlideAudioNarration(pageId, narration),
     addBranchingConnection: (conn: BranchingConnection) =>
@@ -1591,6 +2426,8 @@ export function useCourseStore() {
     updateVariable: (id: string, updates: Partial<CourseVariable>) =>
       globalCourseStore.updateVariable(id, updates),
     deleteVariable: (id: string) => globalCourseStore.deleteVariable(id),
+    updateVariableValue: (idOrName: string, value: string | number | boolean, mode?: 'add' | 'set') =>
+      globalCourseStore.updateVariableValue(idOrName, value, mode),
     saveVersion: (name?: string, note?: string) => globalCourseStore.saveVersion(name, note),
     restoreVersion: (versionId: string) => globalCourseStore.restoreVersion(versionId),
     deleteVersion: (versionId: string) => globalCourseStore.deleteVersion(versionId),
@@ -1615,7 +2452,8 @@ export function useCourseStore() {
     duplicatePage: (idx: number) => globalCourseStore.duplicatePage(idx),
     deletePage: (idx: number) => globalCourseStore.deletePage(idx),
     reorderPages: (from: number, to: number) => globalCourseStore.reorderPages(from, to),
-    updateActivePage: (updates: Partial<Page>) => globalCourseStore.updateActivePage(updates),
+    updateActivePage: (updates: Partial<Page>, recordHistory?: boolean) =>
+      globalCourseStore.updateActivePage(updates, recordHistory),
     addNode: (type: NodeType, pos?: { x: number; y: number }, initialData?: Partial<CanvasNode>) =>
       globalCourseStore.addNode(type, pos, initialData),
     addQuizNode: (quizData: Partial<QuizNode>, pos?: { x: number; y: number }) =>
@@ -1644,9 +2482,14 @@ export function useCourseStore() {
         | 'distribute-h'
         | 'distribute-v'
     ) => globalCourseStore.alignSelected(alignType),
+    alignSelectedToMargins: (edge: 'left' | 'right' | 'top' | 'bottom') =>
+      globalCourseStore.alignSelectedToMargins(edge),
     distributeNodes: (axis: 'horizontal' | 'vertical', targetIds?: string[]) =>
       globalCourseStore.distributeNodes(axis, targetIds),
+    spaceNodesEvenly: (axis: 'horizontal' | 'vertical', gapPx: number, targetIds?: string[]) =>
+      globalCourseStore.spaceNodesEvenly(axis, gapPx, targetIds),
     pushUndo: (desc?: string) => globalCourseStore.pushUndo(desc),
+    commitUndo: (desc?: string) => globalCourseStore.commitUndo(desc),
     undo: () => globalCourseStore.undo(),
     redo: () => globalCourseStore.redo(),
     executeCommand: (command: Command) => globalCourseStore.executeCommand(command),

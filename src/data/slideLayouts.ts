@@ -9,7 +9,7 @@ export type LayoutNode =
 
 export interface SlideLayout {
   id: string;
-  category: 'intro' | 'content' | 'quiz' | 'conclusion';
+  category: 'intro' | 'content' | 'stepper' | 'split' | 'quiz' | 'conclusion';
   title: string;
   description: string;
   badge?: string;
@@ -22,13 +22,13 @@ export interface SlideLayout {
 }
 
 export const SLIDE_LAYOUTS: SlideLayout[] = [
-  // 1. INTRO / HERO
+  // 1. INTRO / TITLE SLIDES
   {
     id: 'layout_intro_hero',
     category: 'intro',
     title: 'Hero Intro & Objective',
     description: 'Impactful title, course badge, learning objective callout, and side hero imagery.',
-    badge: 'Standard Intro',
+    badge: 'Title Slide',
     tags: ['intro', 'hero', 'header', 'objective', 'cover', 'welcome', 'title'],
     background: {
       type: 'gradient',
@@ -113,14 +113,77 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
       },
     ],
   },
+  {
+    id: 'layout_title_modern',
+    category: 'intro',
+    title: 'Modern Executive Cover',
+    description: 'Clean bold title slide with gradient background card and subtle metadata callout.',
+    badge: 'Executive Title',
+    tags: ['intro', 'cover', 'title', 'executive', 'minimal'],
+    background: {
+      type: 'gradient',
+      value: 'linear-gradient(135deg, #090d16 0%, #1e293b 100%)',
+    },
+    nodes: [
+      {
+        type: 'shape',
+        shapeType: 'rounded-rect',
+        x: 80,
+        y: 80,
+        width: 800,
+        height: 380,
+        fill: '#1e293b',
+        borderRadius: 24,
+        opacity: 0.7,
+        zIndex: 1,
+      },
+      {
+        type: 'text',
+        x: 120,
+        y: 130,
+        width: 720,
+        height: 90,
+        content: 'Enterprise Security Protocol & Operational Standards',
+        fontSize: 36,
+        fontWeight: 'bold',
+        color: '#ffffff',
+        textAlign: 'left',
+        zIndex: 2,
+      },
+      {
+        type: 'text',
+        x: 120,
+        y: 235,
+        width: 720,
+        height: 70,
+        content: 'A comprehensive training curriculum for staff, contractors, and compliance officers.',
+        fontSize: 18,
+        fontWeight: 'normal',
+        color: '#cbd5e1',
+        textAlign: 'left',
+        zIndex: 2,
+      },
+      {
+        type: 'callout',
+        x: 120,
+        y: 320,
+        width: 720,
+        height: 100,
+        variant: 'info',
+        title: 'Estimated Duration: 15 Mins',
+        content: 'Complete all interactive exercises and pass the 3-question evaluation to record SCORM compliance.',
+        zIndex: 2,
+      },
+    ],
+  },
 
-  // 2. 3-PILLAR COMPARISON
+  // 2. CONTENT BLOCKS
   {
     id: 'layout_content_pillars',
     category: 'content',
     title: '3-Pillar Framework',
     description: 'Header with 3 balanced concept cards: Info, Warning, and Actionable Pro-Tips.',
-    badge: 'Popular',
+    badge: 'Popular Block',
     tags: ['content', 'pillars', '3-pillar', 'framework', 'cards', 'callout', 'info', 'warning', 'tip'],
     background: {
       type: 'color',
@@ -189,13 +252,86 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     ],
   },
 
-  // 3. SPLIT CONTENT & MEDIA
+  // 3. STEPPERS / PROCESS
+  {
+    id: 'layout_stepper_workflow',
+    category: 'stepper',
+    title: '4-Step Linear Workflow',
+    description: 'Horizontal step-by-step progress blocks outlining sequential procedures.',
+    badge: 'Process Stepper',
+    tags: ['stepper', 'process', 'workflow', 'steps', 'timeline', 'sequence'],
+    background: {
+      type: 'color',
+      value: '#0f172a',
+    },
+    nodes: [
+      {
+        type: 'text',
+        x: 60,
+        y: 40,
+        width: 840,
+        height: 45,
+        content: 'Standard Operating Procedure Workflow',
+        fontSize: 28,
+        fontWeight: 'bold',
+        color: '#ffffff',
+        textAlign: 'center',
+        zIndex: 2,
+      },
+      {
+        type: 'callout',
+        x: 60,
+        y: 110,
+        width: 190,
+        height: 340,
+        variant: 'info',
+        title: 'Step 1: Identify',
+        content: 'Recognize security flags or system variances immediately upon notice.',
+        zIndex: 2,
+      },
+      {
+        type: 'callout',
+        x: 275,
+        y: 110,
+        width: 190,
+        height: 340,
+        variant: 'warning',
+        title: 'Step 2: Isolate',
+        content: 'Disconnect affected network segments to prevent cascading lateral movement.',
+        zIndex: 2,
+      },
+      {
+        type: 'callout',
+        x: 490,
+        y: 110,
+        width: 190,
+        height: 340,
+        variant: 'tip',
+        title: 'Step 3: Remediate',
+        content: 'Apply verified security patches and reset compromised session tokens.',
+        zIndex: 2,
+      },
+      {
+        type: 'callout',
+        x: 705,
+        y: 110,
+        width: 195,
+        height: 340,
+        variant: 'success',
+        title: 'Step 4: Verify',
+        content: 'Run diagnostic health checks and log audit trail entries into SCORM records.',
+        zIndex: 2,
+      },
+    ],
+  },
+
+  // 4. SPLIT SCREEN LAYOUTS
   {
     id: 'layout_split_media',
-    category: 'content',
+    category: 'split',
     title: 'Split Content & Diagram',
     description: 'Two-column layout balancing structured instructional text with featured visual media.',
-    badge: 'Content',
+    badge: 'Split Screen',
     tags: ['content', 'split', 'diagram', 'media', 'two-column', 'image', 'workflow'],
     background: {
       type: 'color',
@@ -256,7 +392,7 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     ],
   },
 
-  // 4. INTERACTIVE QUIZ
+  // 5. INTERACTIVE QUIZ LAYOUTS
   {
     id: 'layout_quiz_scenario',
     category: 'quiz',
@@ -304,13 +440,13 @@ export const SLIDE_LAYOUTS: SlideLayout[] = [
     ],
   },
 
-  // 5. CONCLUSION & LMS TELEMETRY
+  // 6. CONCLUSION & SUMMARIES
   {
     id: 'layout_conclusion_lms',
     category: 'conclusion',
     title: 'LMS Completion & Summary',
     description: 'Celebratory completion badge, key takeaways recap, and SCORM status confirmation.',
-    badge: 'Completion',
+    badge: 'Summary Slide',
     tags: ['conclusion', 'summary', 'completion', 'lms', 'scorm', 'certificate', 'pass', 'telemetry'],
     background: {
       type: 'gradient',

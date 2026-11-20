@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useCourseStore } from '../../store/courseStore';
+import { computeReorderTargetIndex, DropPosition } from '../../utils/slideReorder';
 import {
   Plus,
   Copy,
@@ -7,10 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Palette,
-  Check,
-  MoreVertical,
-  CheckSquare,
-  Square,
+  GripVertical,
 } from 'lucide-react';
 
 interface ContextMenuState {
@@ -18,6 +16,11 @@ interface ContextMenuState {
   y: number;
   targetIndex: number;
   selectedIndices: number[];
+}
+
+interface DropTargetState {
+  index: number;
+  position: DropPosition;
 }
 
 const BG_PRESETS = [
@@ -46,6 +49,8 @@ export const PageTabs: React.FC = () => {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([activePageIndex]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [isChangingBg, setIsChangingBg] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTargetState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   // Sync selectedIndices with activePageIndex if single-select
@@ -88,6 +93,65 @@ export const PageTabs: React.FC = () => {
       setSelectedIndices([index]);
       setActivePage(index);
     }
+  };
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    setDraggedIndex(index);
+    setDropTarget(null);
+    setContextMenu(null);
+    setIsChangingBg(false);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/scorm-slide-index', String(index));
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    const hasSlidePayload =
+      draggedIndex !== null || e.dataTransfer.types.includes('application/scorm-slide-index');
+    if (!hasSlidePayload) return;
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position: DropPosition = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+
+    setDropTarget((prev) =>
+      prev && prev.index === index && prev.position === position ? prev : { index, position }
+    );
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDropTarget((prev) => (prev && prev.index === index ? null : prev));
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
+    e.preventDefault();
+    const rawFrom =
+      e.dataTransfer.getData('application/scorm-slide-index') ||
+      (draggedIndex !== null ? String(draggedIndex) : '');
+    const fromIndex = parseInt(rawFrom, 10);
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const position: DropPosition = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+
+    if (!Number.isNaN(fromIndex) && fromIndex >= 0 && fromIndex < course.pages.length) {
+      const toIndex = computeReorderTargetIndex(fromIndex, targetIndex, position);
+      if (toIndex !== fromIndex && toIndex >= 0 && toIndex < course.pages.length) {
+        reorderPages(fromIndex, toIndex);
+        setSelectedIndices([toIndex]);
+      }
+    }
+
+    setDraggedIndex(null);
+    setDropTarget(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDropTarget(null);
   };
 
   const handleContextMenu = (e: React.MouseEvent, index: number) => {
@@ -153,20 +217,52 @@ export const PageTabs: React.FC = () => {
       </div>
 
       {/* Slide Thumbnails Filmstrip */}
-      <div className="flex items-center gap-3 overflow-x-auto py-2 flex-1">
+      <div className="flex items-center gap-3 overflow-x-auto py-2 px-1 flex-1">
         {course.pages.map((page, index) => {
           const isActive = index === activePageIndex;
           const isSelected = selectedIndices.includes(index);
+          const isDragging = draggedIndex === index;
+
+          const showDropIndicator =
+            dropTarget !== null &&
+            dropTarget.index === index &&
+            draggedIndex !== null &&
+            computeReorderTargetIndex(draggedIndex, index, dropTarget.position) !== draggedIndex;
 
           return (
             <div
               key={page.id}
-              className={`group relative flex flex-col items-center shrink-0 cursor-pointer transition-all ${
-                isActive ? 'scale-105' : 'opacity-75 hover:opacity-100'
+              draggable
+              onDragStart={(e) => handleDragStart(e, index)}
+              onDragOver={(e) => handleDragOver(e, index)}
+              onDragLeave={(e) => handleDragLeave(e, index)}
+              onDrop={(e) => handleDrop(e, index)}
+              onDragEnd={handleDragEnd}
+              title="Click to select, or drag to reorder slide"
+              className={`group relative flex flex-col items-center shrink-0 cursor-grab active:cursor-grabbing transition-all ${
+                isDragging
+                  ? 'opacity-40 scale-95'
+                  : isActive
+                  ? 'scale-105'
+                  : 'opacity-75 hover:opacity-100'
               }`}
               onClick={(e) => handleSlideClick(index, e)}
               onContextMenu={(e) => handleContextMenu(e, index)}
             >
+              {/* Drag-and-Drop Insertion Indicator */}
+              {showDropIndicator && dropTarget.position === 'before' && (
+                <div
+                  aria-hidden="true"
+                  className="absolute -left-2 top-0 bottom-0 w-1 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.95)] z-50 pointer-events-none"
+                />
+              )}
+              {showDropIndicator && dropTarget.position === 'after' && (
+                <div
+                  aria-hidden="true"
+                  className="absolute -right-2 top-0 bottom-0 w-1 rounded-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.95)] z-50 pointer-events-none"
+                />
+              )}
+
               {/* Thumbnail Frame */}
               <div
                 className={`w-28 h-16 rounded border transition-all overflow-hidden relative shadow-sm flex flex-col justify-between p-1.5 ${
@@ -195,22 +291,30 @@ export const PageTabs: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-[9px] font-semibold text-slate-600 bg-white/70 px-1 py-0.5 rounded-[2px] backdrop-blur-xs">
-                  <span>#{index + 1}</span>
-                  <span className="truncate max-w-[60px]">{page.nodes.length} nodes</span>
+                <div className="flex items-center justify-between text-[9px] font-semibold text-slate-600 bg-white/70 px-1 py-0.5 rounded-[2px] backdrop-blur-xs pointer-events-none">
+                  <span className="flex items-center gap-0.5">
+                    <GripVertical className="w-2.5 h-2.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    #{index + 1}
+                  </span>
+                  <span className="truncate max-w-[54px]">{page.nodes.length} nodes</span>
                 </div>
               </div>
 
               {/* Hover Actions Bar */}
-              <div className="absolute -top-3.5 right-0 hidden group-hover:flex items-center gap-0.5 bg-slate-950/90 border border-slate-700 rounded px-1 py-0.5 shadow-lg z-50">
+              <div
+                draggable={false}
+                onDragStart={(e) => e.stopPropagation()}
+                className="absolute -top-3.5 right-0 hidden group-hover:flex items-center gap-0.5 bg-slate-950/90 border border-slate-700 rounded px-1 py-0.5 shadow-lg z-50"
+              >
                 {index > 0 && (
                   <button
                     title="Move Left"
                     onClick={(e) => {
                       e.stopPropagation();
                       reorderPages(index, index - 1);
+                      setSelectedIndices([index - 1]);
                     }}
-                    className="p-0.5 text-slate-400 hover:text-white"
+                    className="p-0.5 text-slate-400 hover:text-white cursor-pointer"
                   >
                     <ChevronLeft className="w-3 h-3" />
                   </button>
@@ -221,8 +325,9 @@ export const PageTabs: React.FC = () => {
                     onClick={(e) => {
                       e.stopPropagation();
                       reorderPages(index, index + 1);
+                      setSelectedIndices([index + 1]);
                     }}
-                    className="p-0.5 text-slate-400 hover:text-white"
+                    className="p-0.5 text-slate-400 hover:text-white cursor-pointer"
                   >
                     <ChevronRight className="w-3 h-3" />
                   </button>
@@ -233,7 +338,7 @@ export const PageTabs: React.FC = () => {
                     e.stopPropagation();
                     duplicatePage(index);
                   }}
-                  className="p-0.5 text-slate-400 hover:text-blue-400"
+                  className="p-0.5 text-slate-400 hover:text-blue-400 cursor-pointer"
                 >
                   <Copy className="w-3 h-3" />
                 </button>
@@ -244,7 +349,7 @@ export const PageTabs: React.FC = () => {
                       e.stopPropagation();
                       deletePage(index);
                     }}
-                    className="p-0.5 text-slate-400 hover:text-red-400"
+                    className="p-0.5 text-slate-400 hover:text-red-400 cursor-pointer"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
@@ -254,9 +359,10 @@ export const PageTabs: React.FC = () => {
           );
         })}
 
-        {/* Add Slide Button */}
+        {/* Single Add Slide Button */}
         <button
           onClick={addPage}
+          title="Add New Slide"
           className="w-28 h-16 shrink-0 rounded border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-800/40 hover:bg-slate-800 flex flex-col items-center justify-center gap-1 text-slate-400 hover:text-blue-400 transition-all cursor-pointer"
         >
           <Plus className="w-5 h-5" />

@@ -22,7 +22,7 @@ export const QuizNodeRenderer: React.FC<Props> = ({ node }) => {
     : 'Multiple Choice';
 
   return (
-    <div className="w-full h-full bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 flex flex-col justify-between overflow-hidden cursor-move">
+    <div className="w-full h-full bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 flex flex-col justify-between overflow-hidden cursor-move select-none">
       <div>
         <div className="flex items-center justify-between mb-3">
           <div

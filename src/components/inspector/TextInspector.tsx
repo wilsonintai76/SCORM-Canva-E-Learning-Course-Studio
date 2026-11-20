@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { TextNode } from '../../types/schema';
-import { AlignLeft, AlignCenter, AlignRight, Bold, Italic } from 'lucide-react';
+import { useCourseStore } from '../../store/courseStore';
+import { interpolateVariables } from '../../utils/variableInterpolator';
+import { AlignLeft, AlignCenter, AlignRight, Code2, Sparkles } from 'lucide-react';
 
 interface Props {
   node: TextNode;
@@ -8,16 +10,81 @@ interface Props {
 }
 
 export const TextInspector: React.FC<Props> = ({ node, onUpdate }) => {
+  const { course } = useCourseStore();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const variables = course.variables || [];
+
+  const handleInsertVariableAtCursor = (varName: string) => {
+    const token = `{{${varName}}}`;
+    const el = textareaRef.current;
+    const current = node.content || '';
+    if (el) {
+      const start = el.selectionStart ?? current.length;
+      const end = el.selectionEnd ?? current.length;
+      const needsSpace =
+        start > 0 && !current.slice(0, start).endsWith(' ') && !current.slice(0, start).endsWith('\n');
+      const insertion = `${needsSpace ? ' ' : ''}${token}`;
+      const nextContent = current.slice(0, start) + insertion + current.slice(end);
+      onUpdate({ content: nextContent });
+      setTimeout(() => {
+        el.focus();
+        const nextPos = start + insertion.length;
+        el.setSelectionRange(nextPos, nextPos);
+      }, 0);
+    } else {
+      onUpdate({ content: `${current}${current ? ' ' : ''}${token}` });
+    }
+  };
+
+  const hasVariables = node.content?.includes('{{');
+
   return (
     <div className="space-y-4 text-xs">
       <div>
         <label className="block text-slate-400 font-medium mb-1.5">Text Content</label>
         <textarea
+          ref={textareaRef}
           rows={3}
           value={node.content}
           onChange={(e) => onUpdate({ content: e.target.value })}
           className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200 outline-none focus:border-blue-500 font-sans resize-y"
         />
+
+        {/* Quick Variable Injection Chips */}
+        {variables.length > 0 && (
+          <div className="mt-2 p-2 rounded-lg bg-slate-950/90 border border-slate-800 space-y-1.5">
+            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-sky-400">
+              <Code2 className="w-3 h-3" />
+              <span>Inject Variable</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {variables.slice(0, 8).map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => handleInsertVariableAtCursor(v.name)}
+                  title={v.description || `Insert {{${v.name}}} (current: ${v.currentValue ?? v.defaultValue})`}
+                  className="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-blue-950 border border-slate-700 hover:border-blue-500 text-[10px] font-mono text-blue-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  +{`{{${v.name}}}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Live Variable Preview when tokens detected */}
+        {hasVariables && (
+          <div className="mt-2 p-2 rounded-lg bg-emerald-950/30 border border-emerald-700/40 space-y-1">
+            <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+              <Sparkles className="w-3 h-3" />
+              <span>Resolved Learner Preview:</span>
+            </div>
+            <div className="text-[11px] text-emerald-100 leading-snug whitespace-pre-wrap">
+              {interpolateVariables(node.content, variables)}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">

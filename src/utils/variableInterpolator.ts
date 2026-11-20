@@ -2,6 +2,22 @@ import { CourseVariable } from '../types/schema';
 
 export const DEFAULT_COURSE_VARIABLES: CourseVariable[] = [
   {
+    id: 'var_user_name',
+    name: 'user_name',
+    type: 'string',
+    defaultValue: 'Learner',
+    currentValue: 'Alex Rivera',
+    description: 'Personalized learner display name',
+  },
+  {
+    id: 'var_score',
+    name: 'score',
+    type: 'number',
+    defaultValue: '0',
+    currentValue: '85',
+    description: 'Dynamic learner course or quiz score (%)',
+  },
+  {
     id: 'var_userName',
     name: 'userName',
     type: 'string',

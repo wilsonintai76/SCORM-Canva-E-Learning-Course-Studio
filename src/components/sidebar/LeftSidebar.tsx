@@ -9,6 +9,7 @@ import { TemplatePreviewThumbnail } from './TemplatePreviewThumbnail';
 import { GlobalThemeEditor } from './GlobalThemeEditor';
 import { QuizTemplatesLibrary } from './QuizTemplatesLibrary';
 import { ComponentTemplatesLibrary } from './ComponentTemplatesLibrary';
+import { ResourceLibraryPanel } from './ResourceLibraryPanel';
 import { LayersPanel } from '../inspector/LayersPanel';
 import {
   Type,
@@ -28,6 +29,8 @@ import {
   GripVertical,
   Layers,
   FolderArchive,
+  FolderHeart,
+  Bookmark,
   Search,
   X,
 } from 'lucide-react';
@@ -40,11 +43,10 @@ export const LeftSidebar: React.FC = () => {
     addSlideWithLayout,
     setIsAiPaletteOpen,
     course,
+    activeSidebarTab: activePanel,
+    setActiveSidebarTab: setActivePanel,
   } = useCourseStore();
 
-  const [activePanel, setActivePanel] = useState<
-    'layouts' | 'components' | 'elements' | 'layers' | 'assets' | 'typography' | 'quiz' | 'theme' | 'courses'
-  >('layouts');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [templateSearchQuery, setTemplateSearchQuery] = useState('');
   const [hoveredLayoutId, setHoveredLayoutId] = useState<string | null>(null);
@@ -66,18 +68,18 @@ export const LeftSidebar: React.FC = () => {
   return (
     <aside className="w-80 bg-slate-900 border-r border-slate-800 flex flex-col h-full shrink-0 select-none">
       {/* Top Section Tabs */}
-      <div className="grid grid-cols-4 sm:grid-cols-8 border-b border-slate-800 bg-slate-950/60 p-1 gap-0.5">
+      <div className="grid grid-cols-5 border-b border-slate-800 bg-slate-950/60 p-1 gap-0.5">
         <button
-          onClick={() => setActivePanel('layouts')}
-          title="Slide Layouts Library"
+          onClick={() => setActivePanel('templates')}
+          title="Browse & Insert Pre-Designed Course Page Templates (Title Slides, Quiz Layouts, Content Blocks, Steppers)"
           className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
-            activePanel === 'layouts'
+            activePanel === 'templates' || activePanel === 'layouts'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <LayoutGrid className="w-3.5 h-3.5" />
-          <span>Layouts</span>
+          <LayoutGrid className="w-3.5 h-3.5 text-blue-400" />
+          <span>Templates</span>
         </button>
 
         <button
@@ -91,6 +93,19 @@ export const LeftSidebar: React.FC = () => {
         >
           <Boxes className="w-3.5 h-3.5 text-sky-400" />
           <span>Blocks</span>
+        </button>
+
+        <button
+          onClick={() => setActivePanel('resources')}
+          title="Resource Library (Save & Reuse Custom Shapes, Branded Icons & Interaction Patterns)"
+          className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
+            activePanel === 'resources' || activePanel === 'my_assets'
+              ? 'bg-slate-800 text-white font-semibold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <FolderHeart className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Resources</span>
         </button>
 
         <button
@@ -115,20 +130,21 @@ export const LeftSidebar: React.FC = () => {
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Layers className="w-3.5 h-3.5 text-cyan-400" />
+          <Layers className="w-3.5 h-3.5 text-teal-400" />
           <span>Layers</span>
         </button>
+
         <button
           onClick={() => setActivePanel('assets')}
-          title="Assets & Shared Graphics Library"
+          title="Stock Assets & Shared Graphics Library"
           className={`py-1.5 text-[9px] font-medium rounded-md flex flex-col items-center justify-center gap-0.5 transition-colors ${
             activePanel === 'assets'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Layers className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Assets</span>
+          <FolderArchive className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Stock</span>
         </button>
         <button
           onClick={() => setActivePanel('typography')}
@@ -181,6 +197,9 @@ export const LeftSidebar: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+        {/* ================= RESOURCE LIBRARY ================= */}
+        {(activePanel === 'resources' || activePanel === 'my_assets') && <ResourceLibraryPanel />}
+
         {/* ================= E-LEARNING COMPONENT TEMPLATES ================= */}
         {activePanel === 'components' && <ComponentTemplatesLibrary />}
 
@@ -196,16 +215,16 @@ export const LeftSidebar: React.FC = () => {
         {/* ================= GLOBAL THEME EDITOR ================= */}
         {activePanel === 'theme' && <GlobalThemeEditor />}
 
-        {/* ================= LAYOUTS LIBRARY ================= */}
-        {activePanel === 'layouts' && (
+        {/* ================= TEMPLATES & PAGE LAYOUTS LIBRARY ================= */}
+        {(activePanel === 'templates' || activePanel === 'layouts') && (
           <div className="space-y-3.5">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <h4 className="text-xs font-bold text-slate-200">Slide Layouts Library</h4>
+                <h4 className="text-xs font-bold text-slate-200">Course Page Templates</h4>
                 <span className="text-[10px] text-blue-400 font-medium">Drag to Canvas</span>
               </div>
               <p className="text-[11px] text-slate-400 leading-tight mb-2.5">
-                Drag any pre-designed slide layout directly onto the active canvas or click to apply.
+                Browse pre-designed slide layouts. Click to apply to the current page, add as a new slide, or drag onto the canvas.
               </p>
 
               {/* Search filter input */}
@@ -215,7 +234,7 @@ export const LeftSidebar: React.FC = () => {
                   type="text"
                   value={templateSearchQuery}
                   onChange={(e) => setTemplateSearchQuery(e.target.value)}
-                  placeholder="Filter templates by name or category..."
+                  placeholder="Filter templates by name, tag, or topic..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-7 py-1.5 text-slate-200 text-xs placeholder:text-slate-500 outline-none focus:border-blue-500"
                 />
                 {templateSearchQuery && (
@@ -232,15 +251,17 @@ export const LeftSidebar: React.FC = () => {
               <div className="flex flex-wrap gap-1">
                 {[
                   { id: 'all', label: 'All' },
-                  { id: 'intro', label: 'Intro' },
+                  { id: 'intro', label: 'Title Slides' },
                   { id: 'content', label: 'Content' },
-                  { id: 'quiz', label: 'Quiz' },
-                  { id: 'conclusion', label: 'Summary' },
+                  { id: 'stepper', label: 'Steppers' },
+                  { id: 'split', label: 'Split Screen' },
+                  { id: 'quiz', label: 'Quizzes' },
+                  { id: 'conclusion', label: 'Summaries' },
                 ].map((cat) => (
                   <button
                     key={cat.id}
                     onClick={() => setSelectedCategory(cat.id)}
-                    className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
+                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
                       selectedCategory === cat.id
                         ? 'bg-blue-600 text-white font-semibold'
                         : 'bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -333,7 +354,7 @@ export const LeftSidebar: React.FC = () => {
                       className="py-1 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-medium transition-colors flex items-center justify-center gap-1"
                     >
                       <ArrowRight className="w-3 h-3 text-blue-400" />
-                      <span>Apply to Slide</span>
+                      <span>Apply Layout</span>
                     </button>
                     <button
                       onClick={() => addSlideWithLayout(layout)}
@@ -341,14 +362,14 @@ export const LeftSidebar: React.FC = () => {
                       className="py-1 px-2 rounded bg-blue-600/80 hover:bg-blue-600 text-white font-medium transition-colors flex items-center justify-center gap-1"
                     >
                       <Plus className="w-3 h-3" />
-                      <span>+ New Slide</span>
+                      <span>New Slide</span>
                     </button>
                   </div>
                 </div>
               ))}
               {filteredLayouts.length === 0 && (
                 <div className="text-center py-8 text-slate-500 text-xs">
-                  No slide templates found matching "{templateSearchQuery}"
+                  No page templates found matching "{templateSearchQuery}"
                 </div>
               )}
             </div>

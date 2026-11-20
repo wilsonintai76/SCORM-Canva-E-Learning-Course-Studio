@@ -56,3 +56,39 @@ test('undo and redo revert alignment and layer changes', () => {
   globalCourseStore.redo();
   assert.equal(globalCourseStore.getState().course.pages[0].nodes[0].x, 0);
 });
+
+test('bringToFront and sendToBack maintain strict zIndex ordering across multiple elements', () => {
+  globalCourseStore.loadCourse(CYBERSECURITY_COURSE);
+  const nodes = globalCourseStore.getState().course.pages[0].nodes;
+  assert.ok(nodes.length >= 3);
+
+  const first = nodes[0];
+  const second = nodes[1];
+  const third = nodes[2];
+
+  // Bring first to front -> strictly greater than every other node
+  globalCourseStore.bringToFront(first.id);
+  const afterFront = globalCourseStore.getState().course.pages[0].nodes;
+  const firstAfterFront = afterFront.find((n) => n.id === first.id)!;
+  const maxOtherAfterFront = Math.max(
+    ...afterFront.filter((n) => n.id !== first.id).map((n) => n.zIndex ?? 1)
+  );
+  assert.ok((firstAfterFront.zIndex ?? 1) > maxOtherAfterFront);
+
+  // Send second to back, then send third to back -> third must stay strictly behind second even at 0
+  globalCourseStore.sendToBack(second.id);
+  globalCourseStore.sendToBack(third.id);
+  const afterBack = globalCourseStore.getState().course.pages[0].nodes;
+  const thirdAfterBack = afterBack.find((n) => n.id === third.id)!;
+  const minOtherAfterBack = Math.min(
+    ...afterBack.filter((n) => n.id !== third.id).map((n) => n.zIndex ?? 1)
+  );
+  assert.ok((thirdAfterBack.zIndex ?? 1) < minOtherAfterBack);
+
+  // Moving forward from zIndex 0 increments cleanly to 1
+  globalCourseStore.moveUp(third.id);
+  const thirdAfterMoveUp = globalCourseStore
+    .getState()
+    .course.pages[0].nodes.find((n) => n.id === third.id)!;
+  assert.equal(thirdAfterMoveUp.zIndex, 1);
+});

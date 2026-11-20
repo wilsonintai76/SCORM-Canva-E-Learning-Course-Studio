@@ -19,6 +19,7 @@ import {
   AlignEndHorizontal,
   AlignHorizontalDistributeCenter,
   AlignVerticalDistributeCenter,
+  FolderHeart,
 } from 'lucide-react';
 import { CanvasNode } from '../../types/schema';
 
@@ -37,6 +38,7 @@ export interface CanvasContextMenuProps {
   onUngroup: () => void;
   onToggleLock: () => void;
   onDelete: () => void;
+  onSaveToMyAssets?: () => void;
   onAlign: (
     type:
       | 'left'
@@ -67,6 +69,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
   onToggleLock,
   onDelete,
   onAlign,
+  onSaveToMyAssets,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -255,6 +258,22 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
           <span>{isLocked ? 'Unlock Element' : 'Lock Element'}</span>
         </span>
       </button>
+
+      {onSaveToMyAssets && (
+        <button
+          onClick={() => {
+            onSaveToMyAssets();
+            onClose();
+          }}
+          className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-slate-800/90 hover:text-white transition-colors cursor-pointer text-left"
+        >
+          <span className="flex items-center gap-2">
+            <FolderHeart className="w-3.5 h-3.5 text-sky-400" />
+            <span>Save to My Assets</span>
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono">Reusable</span>
+        </button>
+      )}
 
       <div className="h-[1px] bg-slate-800/80 my-1 mx-2" />
 

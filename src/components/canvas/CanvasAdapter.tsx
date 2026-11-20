@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useCourseStore, globalCourseStore } from '../../store/courseStore';
-import { CanvasNode, NodeType, TextNode, AssetItem } from '../../types/schema';
+import { CanvasNode, NodeType, TextNode, AssetItem, CanvasGuide } from '../../types/schema';
 import { TypographyPreset } from '../../data/typographyData';
 import { ComponentTemplateItem } from '../../data/componentTemplatesData';
 import { calculateSnapping, snapValueToGrid, SnapGuide, NodeBounds } from '../../utils/snappingEngine';
@@ -11,7 +11,23 @@ import { ImageNodeRenderer } from './renderers/ImageNodeRenderer';
 import { QuizNodeRenderer } from './renderers/QuizNodeRenderer';
 import { ShapeNodeRenderer } from './renderers/ShapeNodeRenderer';
 import { CalloutNodeRenderer } from './renderers/CalloutNodeRenderer';
+import { TimelineDrawer } from '../timeline/TimelineDrawer';
+import { SpeakerNotesDrawer } from './SpeakerNotesDrawer';
+import { SelectionManagerDrawer } from './SelectionManagerDrawer';
+import { evaluateNodeAnimationAtTime } from '../../utils/animationTimeline';
 import {
+  clampHudPosition,
+  loadSavedHudPositions,
+  saveHudPositions,
+  HudPositionsState,
+} from '../../utils/hudPosition';
+import {
+  computeResizedBounds,
+  computeMovedPositions,
+  ResizeHandle,
+} from '../../utils/canvasTransform';
+import {
+  Zap,
   Copy,
   Trash2,
   ArrowUp,
@@ -39,10 +55,19 @@ import {
   AlignHorizontalDistributeCenter,
   AlignVerticalDistributeCenter,
   GripVertical,
+  FolderHeart,
+  BookmarkPlus,
+  X,
+  Ruler,
+  Eye,
+  EyeOff,
+  MessageSquare,
+  Check,
+  ChevronLeft,
 } from 'lucide-react';
 
 interface DragState {
-  type: 'move' | 'resize' | 'pan';
+  type: 'move' | 'resize' | 'pan' | 'group-resize';
   nodeId?: string;
   startX: number;
   startY: number;
@@ -50,10 +75,11 @@ interface DragState {
   initialY: number;
   initialWidth?: number;
   initialHeight?: number;
-  resizeHandle?: string;
+  resizeHandle?: ResizeHandle;
   initialPanX?: number;
   initialPanY?: number;
   initialNodesMap?: Record<string, { x: number; y: number; width: number; height: number }>;
+  targetGroupNodeIds?: string[];
   hasPushedUndo?: boolean;
 }
 
@@ -75,6 +101,14 @@ export const CanvasAdapter: React.FC = () => {
     pan,
     showRulers,
     showGuides,
+    setShowRulers,
+    setShowGuides,
+    addGuide,
+    updateGuide,
+    deleteGuide,
+    clearAllGuides,
+    toggleLockGuide,
+    addPresetGuides,
     setZoom,
     setPan,
     resetView,
@@ -83,6 +117,10 @@ export const CanvasAdapter: React.FC = () => {
     toggleNodeSelection,
     groupNodes,
     ungroupNodes,
+    transformGroup,
+    scaleGroup,
+    saveSelectionToMyAssets,
+    addMyAssetToCanvas,
     toggleLockNode,
     updateNode,
     deleteNode,
@@ -99,14 +137,38 @@ export const CanvasAdapter: React.FC = () => {
     undo,
     redo,
     pushUndo,
+    commitUndo,
+    addComment,
+    activeCommentMode,
+    setActiveCommentMode,
+    showVariablePreview,
   } = useCourseStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const didDragMoveRef = useRef(false);
 
   const [toolMode, setToolMode] = useState<'select' | 'pan'>('select');
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [draggingGuide, setDraggingGuide] = useState<{
+    id?: string;
+    orientation: 'horizontal' | 'vertical';
+    position: number;
+    isNew: boolean;
+  } | null>(null);
+  const [hoveredGuideId, setHoveredGuideId] = useState<string | null>(null);
+  const [mousePosOnCanvas, setMousePosOnCanvas] = useState<{ x: number; y: number } | null>(null);
+  const [isRulerMenuOpen, setIsRulerMenuOpen] = useState(false);
+  const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
+  const [isSelectionDrawerOpen, setIsSelectionDrawerOpen] = useState(false);
+  const [isSaveResourcePopoverOpen, setIsSaveResourcePopoverOpen] = useState(false);
+  const [saveResourceName, setSaveResourceName] = useState('');
+  const [saveResourceCategory, setSaveResourceCategory] = useState<
+    'patterns' | 'shapes' | 'icons' | 'cards' | 'groups'
+  >('patterns');
+  const [liveScrubTime, setLiveScrubTime] = useState<number | null>(null);
   const [snapLineX, setSnapLineX] = useState<number | null>(null);
   const [snapLineY, setSnapLineY] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -128,6 +190,19 @@ export const CanvasAdapter: React.FC = () => {
     startY: number;
     currentX: number;
     currentY: number;
+  } | null>(null);
+
+  const topHudRef = useRef<HTMLDivElement>(null);
+  const zoomHudRef = useRef<HTMLDivElement>(null);
+  const [hudPositions, setHudPositions] = useState<HudPositionsState>(() => loadSavedHudPositions());
+  const [draggingHud, setDraggingHud] = useState<{
+    target: 'topToolbar' | 'zoomHud';
+    startX: number;
+    startY: number;
+    initialX: number;
+    initialY: number;
+    hudWidth: number;
+    hudHeight: number;
   } | null>(null);
 
   const canvasWidth = course.canvasWidth || 960;
@@ -183,9 +258,21 @@ export const CanvasAdapter: React.FC = () => {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') {
+      } else if (e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        redo();
+        setIsTimelineOpen((prev) => !prev);
+      } else if (e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        setIsSelectionDrawerOpen((prev) => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        setZoom(Math.min(2.0, globalCourseStore.getState().zoom + 0.1));
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault();
+        setZoom(Math.max(0.4, globalCourseStore.getState().zoom - 0.1));
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault();
+        resetView();
       } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         if (selectedNodeIds.length > 0 && currentPage) {
           e.preventDefault();
@@ -232,6 +319,86 @@ export const CanvasAdapter: React.FC = () => {
     undo,
     redo,
     updateNode,
+  ]);
+
+  // Window pointer listeners for magnetic guide creation and repositioning
+  useEffect(() => {
+    if (!draggingGuide) return;
+
+    const handleWindowPointerMove = (e: PointerEvent) => {
+      if (!stageRef.current) return;
+      const rect = stageRef.current.getBoundingClientRect();
+      if (draggingGuide.orientation === 'horizontal') {
+        let curY = Math.round((e.clientY - rect.top) / zoom);
+        if (isSnapToGridEnabled) {
+          curY = snapValueToGrid(curY, gridSize).val;
+        }
+        setDraggingGuide((prev) => (prev ? { ...prev, position: curY } : null));
+      } else {
+        let curX = Math.round((e.clientX - rect.left) / zoom);
+        if (isSnapToGridEnabled) {
+          curX = snapValueToGrid(curX, gridSize).val;
+        }
+        setDraggingGuide((prev) => (prev ? { ...prev, position: curX } : null));
+      }
+    };
+
+    const handleWindowPointerUp = (e: PointerEvent) => {
+      if (!stageRef.current) {
+        setDraggingGuide(null);
+        return;
+      }
+      const rect = stageRef.current.getBoundingClientRect();
+      const rawX = Math.round((e.clientX - rect.left) / zoom);
+      const rawY = Math.round((e.clientY - rect.top) / zoom);
+
+      if (draggingGuide.orientation === 'horizontal') {
+        const finalY = isSnapToGridEnabled ? snapValueToGrid(rawY, gridSize).val : rawY;
+        // If dropped off canvas (e.g. back into ruler or outside stage boundaries)
+        if (finalY < 0 || finalY > canvasHeight) {
+          if (!draggingGuide.isNew && draggingGuide.id) {
+            deleteGuide(draggingGuide.id);
+          }
+        } else {
+          if (draggingGuide.isNew) {
+            addGuide('horizontal', finalY);
+          } else if (draggingGuide.id) {
+            updateGuide(draggingGuide.id, finalY);
+          }
+        }
+      } else {
+        const finalX = isSnapToGridEnabled ? snapValueToGrid(rawX, gridSize).val : rawX;
+        if (finalX < 0 || finalX > canvasWidth) {
+          if (!draggingGuide.isNew && draggingGuide.id) {
+            deleteGuide(draggingGuide.id);
+          }
+        } else {
+          if (draggingGuide.isNew) {
+            addGuide('vertical', finalX);
+          } else if (draggingGuide.id) {
+            updateGuide(draggingGuide.id, finalX);
+          }
+        }
+      }
+      setDraggingGuide(null);
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove);
+    window.addEventListener('pointerup', handleWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handleWindowPointerMove);
+      window.removeEventListener('pointerup', handleWindowPointerUp);
+    };
+  }, [
+    draggingGuide,
+    zoom,
+    canvasWidth,
+    canvasHeight,
+    isSnapToGridEnabled,
+    gridSize,
+    addGuide,
+    updateGuide,
+    deleteGuide,
   ]);
 
   // Fit to screen helper
@@ -286,6 +453,22 @@ export const CanvasAdapter: React.FC = () => {
     }
 
     if (e.target === containerRef.current || e.target === stageRef.current) {
+      if (activeCommentMode && stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
+        const stageX = Math.round((e.clientX - rect.left) / zoom);
+        const stageY = Math.round((e.clientY - rect.top) / zoom);
+        addComment({
+          pageId: currentPage.id,
+          x: Math.max(10, Math.min(canvasWidth - 10, stageX)),
+          y: Math.max(10, Math.min(canvasHeight - 10, stageY)),
+          author: 'Instructional Reviewer',
+          text: 'Feedback note on coordinate point',
+          color: 'yellow',
+        });
+        setActiveCommentMode(false);
+        return;
+      }
+
       if (!e.shiftKey) {
         setSelectedNodeId(null);
       }
@@ -315,6 +498,7 @@ export const CanvasAdapter: React.FC = () => {
     }
 
     e.stopPropagation();
+    didDragMoveRef.current = false;
 
     let activeSelectedIds = selectedNodeIds;
     if (e.shiftKey) {
@@ -336,7 +520,7 @@ export const CanvasAdapter: React.FC = () => {
 
     const initialNodesMap: Record<string, { x: number; y: number; width: number; height: number }> = {};
     currentPage.nodes.forEach((n) => {
-      if (activeSelectedIds.includes(n.id)) {
+      if (activeSelectedIds.includes(n.id) && !n.isLocked) {
         initialNodesMap[n.id] = { x: n.x, y: n.y, width: n.width, height: n.height };
       }
     });
@@ -389,13 +573,67 @@ export const CanvasAdapter: React.FC = () => {
     });
   };
 
+  // Top Ruler Pointer Down (Drag down to create horizontal magnetic guide)
+  const handleTopRulerPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    if (!stageRef.current) return;
+    const rect = stageRef.current.getBoundingClientRect();
+    let curY = Math.round((e.clientY - rect.top) / zoom);
+    if (isSnapToGridEnabled) {
+      curY = snapValueToGrid(curY, gridSize).val;
+    }
+    setDraggingGuide({
+      orientation: 'horizontal',
+      position: curY,
+      isNew: true,
+    });
+  };
+
+  // Left Ruler Pointer Down (Drag right to create vertical magnetic guide)
+  const handleLeftRulerPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    if (!stageRef.current) return;
+    const rect = stageRef.current.getBoundingClientRect();
+    let curX = Math.round((e.clientX - rect.left) / zoom);
+    if (isSnapToGridEnabled) {
+      curX = snapValueToGrid(curX, gridSize).val;
+    }
+    setDraggingGuide({
+      orientation: 'vertical',
+      position: curX,
+      isNew: true,
+    });
+  };
+
+  // Guide Pointer Down (Drag existing guide to reposition)
+  const handleGuidePointerDown = (e: React.PointerEvent, guide: CanvasGuide) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    if (guide.isLocked) return;
+    setDraggingGuide({
+      id: guide.id,
+      orientation: guide.orientation,
+      position: guide.position,
+      isNew: false,
+    });
+  };
+
   // Resize Handle Pointer Down
-  const handleResizePointerDown = (e: React.PointerEvent, nodeId: string, handle: string) => {
+  const handleResizePointerDown = (
+    e: React.PointerEvent,
+    nodeId: string,
+    handle: ResizeHandle
+  ) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
     e.stopPropagation();
     if (!currentPage) return;
     const node = currentPage.nodes.find((n) => n.id === nodeId);
-    if (!node) return;
+    if (!node || node.isLocked) return;
 
+    didDragMoveRef.current = false;
     setDragState({
       type: 'resize',
       nodeId,
@@ -406,6 +644,40 @@ export const CanvasAdapter: React.FC = () => {
       initialWidth: node.width,
       initialHeight: node.height,
       resizeHandle: handle,
+    });
+  };
+
+  // Pointer Down on Group / Parent Entity Resize Handle
+  const handleGroupResizePointerDown = (
+    e: React.PointerEvent,
+    handle: ResizeHandle,
+    bounds: { minX: number; minY: number; maxX: number; maxY: number }
+  ) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentPage || selectedNodeIds.length === 0) return;
+    if (toolMode === 'pan' || isSpacePressed) return;
+
+    didDragMoveRef.current = false;
+    const initialNodesMap: Record<string, { x: number; y: number; width: number; height: number }> = {};
+    currentPage.nodes.forEach((n) => {
+      if (selectedNodeIds.includes(n.id) && !n.isLocked) {
+        initialNodesMap[n.id] = { x: n.x, y: n.y, width: n.width, height: n.height };
+      }
+    });
+
+    setDragState({
+      type: 'group-resize',
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: bounds.minX,
+      initialY: bounds.minY,
+      initialWidth: bounds.maxX - bounds.minX,
+      initialHeight: bounds.maxY - bounds.minY,
+      resizeHandle: handle,
+      targetGroupNodeIds: [...selectedNodeIds],
+      initialNodesMap,
     });
   };
 
@@ -443,9 +715,29 @@ export const CanvasAdapter: React.FC = () => {
     }
   };
 
-  // Drag Pointer Move
-  const handlePointerMove = useCallback(
+  // Idle ruler cursor tracking inside canvas container
+  const handleContainerPointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
+        const curX = Math.round((e.clientX - rect.left) / zoom);
+        const curY = Math.round((e.clientY - rect.top) / zoom);
+        setMousePosOnCanvas({ x: curX, y: curY });
+      }
+    },
+    [zoom]
+  );
+
+  // Active drag, resize, pan, and marquee tracking bound to window so fast drags outside bounds never stick
+  const processPointerMove = useCallback(
+    (e: { clientX: number; clientY: number; shiftKey: boolean }) => {
+      if (stageRef.current) {
+        const rect = stageRef.current.getBoundingClientRect();
+        const curX = Math.round((e.clientX - rect.left) / zoom);
+        const curY = Math.round((e.clientY - rect.top) / zoom);
+        setMousePosOnCanvas({ x: curX, y: curY });
+      }
+
       // 1. Marquee Selection Drag
       if (marqueeState && stageRef.current && currentPage) {
         const rect = stageRef.current.getBoundingClientRect();
@@ -488,19 +780,30 @@ export const CanvasAdapter: React.FC = () => {
         return;
       }
 
-      if (!currentPage || !dragState.nodeId) return;
+      if (!currentPage) return;
+      if (dragState.type !== 'group-resize' && !dragState.nodeId) return;
 
       const deltaX = (e.clientX - dragState.startX) / zoom;
       const deltaY = (e.clientY - dragState.startY) / zoom;
+
+      if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
+        didDragMoveRef.current = true;
+      }
 
       // On first significant pointer movement, push an undo state before moving or resizing
       if (
         !dragState.hasPushedUndo &&
         (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) &&
-        (dragState.type === 'move' || dragState.type === 'resize')
+        (dragState.type === 'move' || dragState.type === 'resize' || dragState.type === 'group-resize')
       ) {
         dragState.hasPushedUndo = true;
-        pushUndo();
+        pushUndo(
+          dragState.type === 'move'
+            ? 'Move element'
+            : dragState.type === 'group-resize'
+            ? 'Transform group'
+            : 'Resize element'
+        );
       }
 
       if (dragState.type === 'move') {
@@ -527,11 +830,13 @@ export const CanvasAdapter: React.FC = () => {
           canvasWidth,
           canvasHeight,
           gridSize,
-          isSnapToGridEnabled
+          isSnapToGridEnabled,
+          8,
+          currentPage.guides || []
         );
 
-        const newX = snapResult.x;
-        const newY = snapResult.y;
+        const newX = Math.round(snapResult.x);
+        const newY = Math.round(snapResult.y);
 
         setSmartGuidesX(snapResult.guidesX);
         setSmartGuidesY(snapResult.guidesY);
@@ -540,62 +845,56 @@ export const CanvasAdapter: React.FC = () => {
         const offsetY = newY - dragState.initialY;
 
         if (dragState.initialNodesMap) {
-          Object.entries(dragState.initialNodesMap).forEach(([id, initPos]) => {
-            updateNode(id, { x: initPos.x + offsetX, y: initPos.y + offsetY }, false);
+          const movedPositions = computeMovedPositions(dragState.initialNodesMap, offsetX, offsetY);
+          Object.entries(movedPositions).forEach(([id, pos]) => {
+            updateNode(id, { x: pos.x, y: pos.y }, false);
           });
         } else if (dragState.nodeId) {
           updateNode(dragState.nodeId, { x: newX, y: newY }, false);
         }
-      } else if (dragState.type === 'resize' && dragState.resizeHandle) {
-        let newX = dragState.initialX;
-        let newY = dragState.initialY;
-        let newW = dragState.initialWidth || 40;
-        let newH = dragState.initialHeight || 40;
+      } else if (dragState.type === 'resize' && dragState.resizeHandle && dragState.nodeId) {
+        const nextBounds = computeResizedBounds({
+          initialBounds: {
+            x: dragState.initialX,
+            y: dragState.initialY,
+            width: dragState.initialWidth || 40,
+            height: dragState.initialHeight || 40,
+          },
+          handle: dragState.resizeHandle,
+          deltaX,
+          deltaY,
+          minSize: 20,
+          preserveAspectRatio: e.shiftKey,
+          snapToGrid: isSnapToGridEnabled,
+          gridSize,
+        });
 
-        const MIN_SIZE = 20;
+        updateNode(dragState.nodeId, nextBounds, false);
+      } else if (dragState.type === 'group-resize' && dragState.resizeHandle && dragState.targetGroupNodeIds) {
+        const nextBounds = computeResizedBounds({
+          initialBounds: {
+            x: dragState.initialX,
+            y: dragState.initialY,
+            width: dragState.initialWidth || 40,
+            height: dragState.initialHeight || 40,
+          },
+          handle: dragState.resizeHandle,
+          deltaX,
+          deltaY,
+          minSize: 30,
+          preserveAspectRatio: e.shiftKey,
+          snapToGrid: isSnapToGridEnabled,
+          gridSize,
+        });
 
-        if (dragState.resizeHandle.includes('e')) {
-          newW = Math.max(MIN_SIZE, (dragState.initialWidth || 40) + deltaX);
-          if (isSnapToGridEnabled) {
-            const snappedRight = snapValueToGrid(dragState.initialX + newW, gridSize).val;
-            newW = Math.max(MIN_SIZE, snappedRight - dragState.initialX);
-          }
-        }
-        if (dragState.resizeHandle.includes('s')) {
-          newH = Math.max(MIN_SIZE, (dragState.initialHeight || 40) + deltaY);
-          if (isSnapToGridEnabled) {
-            const snappedBottom = snapValueToGrid(dragState.initialY + newH, gridSize).val;
-            newH = Math.max(MIN_SIZE, snappedBottom - dragState.initialY);
-          }
-        }
-        if (dragState.resizeHandle.includes('w')) {
-          const maxDeltaW = (dragState.initialWidth || 40) - MIN_SIZE;
-          const appliedDelta = Math.min(deltaX, maxDeltaW);
-          let targetX = dragState.initialX + appliedDelta;
-          if (isSnapToGridEnabled) {
-            targetX = snapValueToGrid(targetX, gridSize).val;
-          }
-          newW = (dragState.initialX + (dragState.initialWidth || 40)) - targetX;
-          newX = targetX;
-        }
-        if (dragState.resizeHandle.includes('n')) {
-          const maxDeltaH = (dragState.initialHeight || 40) - MIN_SIZE;
-          const appliedDelta = Math.min(deltaY, maxDeltaH);
-          let targetY = dragState.initialY + appliedDelta;
-          if (isSnapToGridEnabled) {
-            targetY = snapValueToGrid(targetY, gridSize).val;
-          }
-          newH = (dragState.initialY + (dragState.initialHeight || 40)) - targetY;
-          newY = targetY;
-        }
-
-        updateNode(
-          dragState.nodeId,
+        transformGroup(
+          dragState.targetGroupNodeIds,
+          nextBounds,
           {
-            x: Math.round(newX),
-            y: Math.round(newY),
-            width: Math.round(newW),
-            height: Math.round(newH),
+            x: dragState.initialX,
+            y: dragState.initialY,
+            width: dragState.initialWidth || 40,
+            height: dragState.initialHeight || 40,
           },
           false
         );
@@ -613,13 +912,23 @@ export const CanvasAdapter: React.FC = () => {
       gridSize,
       setPan,
       updateNode,
+      transformGroup,
       setSelectedNodeIds,
       pushUndo,
     ]
   );
 
-  const handlePointerUp = useCallback(() => {
+  const finalizePointerInteraction = useCallback(() => {
     if (dragState) {
+      if (dragState.hasPushedUndo) {
+        commitUndo(
+          dragState.type === 'move'
+            ? 'Move element'
+            : dragState.type === 'group-resize'
+            ? 'Transform group'
+            : 'Resize element'
+        );
+      }
       setDragState(null);
       setSnapLineX(null);
       setSnapLineY(null);
@@ -629,7 +938,27 @@ export const CanvasAdapter: React.FC = () => {
     if (marqueeState) {
       setMarqueeState(null);
     }
-  }, [dragState, marqueeState]);
+  }, [dragState, marqueeState, commitUndo]);
+
+  useEffect(() => {
+    if (!dragState && !marqueeState) return;
+
+    const handleWindowMove = (e: PointerEvent) => {
+      processPointerMove(e);
+    };
+    const handleWindowUp = () => {
+      finalizePointerInteraction();
+    };
+
+    window.addEventListener('pointermove', handleWindowMove);
+    window.addEventListener('pointerup', handleWindowUp);
+    window.addEventListener('pointercancel', handleWindowUp);
+    return () => {
+      window.removeEventListener('pointermove', handleWindowMove);
+      window.removeEventListener('pointerup', handleWindowUp);
+      window.removeEventListener('pointercancel', handleWindowUp);
+    };
+  }, [dragState, marqueeState, processPointerMove, finalizePointerInteraction]);
 
   // Drag and Drop from Sidebar into Canvas
   const handleDragOver = (e: React.DragEvent) => {
@@ -648,6 +977,7 @@ export const CanvasAdapter: React.FC = () => {
     }
 
     const hasLayout = e.dataTransfer.types.includes('application/scorm-slide-layout');
+    const hasMyAsset = e.dataTransfer.types.includes('application/scorm-my-asset');
     const hasAsset = e.dataTransfer.types.includes('application/scorm-asset');
     const hasTypography = e.dataTransfer.types.includes('application/scorm-typography');
     const hasQuiz = e.dataTransfer.types.includes('application/scorm-quiz-template');
@@ -657,7 +987,7 @@ export const CanvasAdapter: React.FC = () => {
       (e.dataTransfer.items && Array.from(e.dataTransfer.items).some((item) => item.kind === 'file'));
 
     if (hasLayout) setDragOverKind('layout');
-    else if (hasComponent) setDragOverKind('component');
+    else if (hasMyAsset || hasComponent) setDragOverKind('component');
     else if (hasAsset) setDragOverKind('asset');
     else if (hasTypography) setDragOverKind('typography');
     else if (hasQuiz) setDragOverKind('quiz');
@@ -689,6 +1019,24 @@ export const CanvasAdapter: React.FC = () => {
     if (isSnapToGridEnabled) {
       dropX = snapValueToGrid(dropX, gridSize).val;
       dropY = snapValueToGrid(dropY, gridSize).val;
+    }
+
+    // 0. Check for Resource Library / My Asset drop
+    const myAssetJson = e.dataTransfer.getData('application/scorm-my-asset');
+    if (myAssetJson) {
+      try {
+        const asset = JSON.parse(myAssetJson);
+        addMyAssetToCanvas(
+          asset.id,
+          { x: dropX, y: dropY },
+          { applyBrandTheme: asset.applyBrandTheme !== false }
+        );
+        setLayoutToast(`Inserted "${asset.name}" from Resource Library!`);
+        setTimeout(() => setLayoutToast(null), 2500);
+        return;
+      } catch (err) {
+        console.error('Failed to parse dropped custom asset:', err);
+      }
     }
 
     // 1. Check for Slide Layout drop
@@ -1015,6 +1363,144 @@ export const CanvasAdapter: React.FC = () => {
     }
   };
 
+  // Handle dragging for the two floating HUD toolbars
+  useEffect(() => {
+    if (!draggingHud) return;
+
+    const handleHudMove = (e: PointerEvent) => {
+      const containerEl = containerRef.current;
+      if (!containerEl) return;
+      const containerRect = containerEl.getBoundingClientRect();
+      const next = clampHudPosition(
+        draggingHud.initialX + (e.clientX - draggingHud.startX),
+        draggingHud.initialY + (e.clientY - draggingHud.startY),
+        draggingHud.hudWidth,
+        draggingHud.hudHeight,
+        containerRect.width,
+        containerRect.height
+      );
+      setHudPositions((prev) => ({
+        ...prev,
+        [draggingHud.target]: next,
+      }));
+    };
+
+    const handleHudUp = () => {
+      setHudPositions((prev) => {
+        saveHudPositions(prev);
+        return prev;
+      });
+      setDraggingHud(null);
+    };
+
+    window.addEventListener('pointermove', handleHudMove);
+    window.addEventListener('pointerup', handleHudUp);
+    window.addEventListener('pointercancel', handleHudUp);
+    return () => {
+      window.removeEventListener('pointermove', handleHudMove);
+      window.removeEventListener('pointerup', handleHudUp);
+      window.removeEventListener('pointercancel', handleHudUp);
+    };
+  }, [draggingHud]);
+
+  // Keep moved HUD bars inside viewport when container resizes
+  useEffect(() => {
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+
+    const clampBoth = () => {
+      const rect = containerEl.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      setHudPositions((prev) => {
+        let changed = false;
+        const next: HudPositionsState = { ...prev };
+        if (prev.topToolbar && topHudRef.current) {
+          const r = topHudRef.current.getBoundingClientRect();
+          const clamped = clampHudPosition(
+            prev.topToolbar.x,
+            prev.topToolbar.y,
+            r.width,
+            r.height,
+            rect.width,
+            rect.height
+          );
+          if (clamped.x !== prev.topToolbar.x || clamped.y !== prev.topToolbar.y) {
+            next.topToolbar = clamped;
+            changed = true;
+          }
+        }
+        if (prev.zoomHud && zoomHudRef.current) {
+          const r = zoomHudRef.current.getBoundingClientRect();
+          const clamped = clampHudPosition(
+            prev.zoomHud.x,
+            prev.zoomHud.y,
+            r.width,
+            r.height,
+            rect.width,
+            rect.height
+          );
+          if (clamped.x !== prev.zoomHud.x || clamped.y !== prev.zoomHud.y) {
+            next.zoomHud = clamped;
+            changed = true;
+          }
+        }
+        if (changed) {
+          saveHudPositions(next);
+          return next;
+        }
+        return prev;
+      });
+    };
+
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(clampBoth) : null;
+    ro?.observe(containerEl);
+    window.addEventListener('resize', clampBoth);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', clampBoth);
+    };
+  }, []);
+
+  const startHudDrag = (
+    target: 'topToolbar' | 'zoomHud',
+    e: React.PointerEvent,
+    requireHandle = false
+  ) => {
+    if (e.button !== 0) return;
+    const el = e.target as HTMLElement;
+    if (!requireHandle && el.closest('button, input, select, [data-hud-menu]')) {
+      return;
+    }
+
+    const hudEl = target === 'topToolbar' ? topHudRef.current : zoomHudRef.current;
+    const containerEl = containerRef.current;
+    if (!hudEl || !containerEl) return;
+
+    e.stopPropagation();
+    e.preventDefault();
+
+    const hudRect = hudEl.getBoundingClientRect();
+    const containerRect = containerEl.getBoundingClientRect();
+
+    setDraggingHud({
+      target,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialX: hudRect.left - containerRect.left,
+      initialY: hudRect.top - containerRect.top,
+      hudWidth: hudRect.width,
+      hudHeight: hudRect.height,
+    });
+  };
+
+  const resetHudPosition = (target: 'topToolbar' | 'zoomHud') => {
+    setHudPositions((prev) => {
+      const next = { ...prev, [target]: null };
+      saveHudPositions(next);
+      return next;
+    });
+  };
+
   if (!currentPage) {
     return (
       <div className="flex-1 flex items-center justify-center bg-slate-950 text-slate-400">
@@ -1039,37 +1525,61 @@ export const CanvasAdapter: React.FC = () => {
     : null;
 
   return (
-    <div
-      ref={containerRef}
-      className={`flex-1 relative overflow-hidden bg-slate-950 flex items-center justify-center select-none ${
-        isPanningActive
-          ? dragState?.type === 'pan'
-            ? 'cursor-grabbing'
-            : 'cursor-grab'
-          : 'cursor-default'
-      }`}
-      style={{
-        backgroundImage: isSnapToGridEnabled
-          ? `radial-gradient(#0284c7 1.2px, transparent 1.2px)`
-          : 'radial-gradient(#334155 0.75px, transparent 0.75px)',
-        backgroundSize: isSnapToGridEnabled ? `${gridSize * 2}px ${gridSize * 2}px` : '24px 24px',
-        backgroundPosition: `${pan.x % (isSnapToGridEnabled ? gridSize * 2 : 24)}px ${
-          pan.y % (isSnapToGridEnabled ? gridSize * 2 : 24)
-        }px`,
-      }}
-      onPointerDown={handleContainerPointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onWheel={handleWheel}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      {/* Floating Canvas HUD Toolbar (Pan/Select, Zoom, Fit) */}
+    <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-slate-950 select-none">
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
       <div
-        className="absolute top-4 left-6 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-1 shadow-xl flex items-center gap-1 text-xs"
+        ref={containerRef}
+        className={`flex-1 relative overflow-hidden bg-slate-950 flex items-center justify-center select-none ${
+          isPanningActive
+            ? dragState?.type === 'pan'
+              ? 'cursor-grabbing'
+              : 'cursor-grab'
+            : 'cursor-default'
+        }`}
+        style={{
+          backgroundImage: isSnapToGridEnabled
+            ? `radial-gradient(#0284c7 1.2px, transparent 1.2px)`
+            : 'radial-gradient(#334155 0.75px, transparent 0.75px)',
+          backgroundSize: isSnapToGridEnabled ? `${gridSize * 2}px ${gridSize * 2}px` : '24px 24px',
+          backgroundPosition: `${pan.x % (isSnapToGridEnabled ? gridSize * 2 : 24)}px ${
+            pan.y % (isSnapToGridEnabled ? gridSize * 2 : 24)
+          }px`,
+        }}
+        onPointerDown={handleContainerPointerDown}
+        onPointerMove={handleContainerPointerMove}
+        onWheel={handleWheel}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+      {/* Movable Floating Canvas HUD Toolbar (Pan/Select, Zoom, Fit, Timeline, Selection) */}
+      <div
+        ref={topHudRef}
+        style={
+          hudPositions.topToolbar
+            ? { left: `${hudPositions.topToolbar.x}px`, top: `${hudPositions.topToolbar.y}px` }
+            : undefined
+        }
+        onPointerDown={(e) => startHudDrag('topToolbar', e)}
+        className={`absolute z-40 bg-slate-900/95 backdrop-blur-md border rounded-xl p-1 shadow-xl flex items-center gap-1 text-xs transition-shadow ${
+          hudPositions.topToolbar ? '' : 'top-4 left-6'
+        } ${
+          draggingHud?.target === 'topToolbar'
+            ? 'border-sky-500/80 ring-2 ring-sky-500/20 shadow-2xl cursor-grabbing'
+            : 'border-slate-700/80'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
+        <div
+          role="button"
+          tabIndex={0}
+          onPointerDown={(e) => startHudDrag('topToolbar', e, true)}
+          onDoubleClick={() => resetHudPosition('topToolbar')}
+          title="Drag to move toolbar (double-click to reset position)"
+          className="px-0.5 py-1 text-slate-500 hover:text-slate-200 cursor-grab active:cursor-grabbing rounded flex items-center justify-center shrink-0"
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
         <button
           title="Select Tool (V)"
           onClick={() => setToolMode('select')}
@@ -1091,6 +1601,19 @@ export const CanvasAdapter: React.FC = () => {
           }`}
         >
           <Hand className="w-3.5 h-3.5" />
+        </button>
+
+        <button
+          title="Pin Note / Add Annotation to Canvas (Click anywhere on stage)"
+          onClick={() => setActiveCommentMode(!activeCommentMode)}
+          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+            activeCommentMode
+              ? 'bg-amber-500 text-slate-950 font-bold animate-pulse'
+              : 'text-amber-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          <span className="hidden md:inline font-medium text-[11px]">Pin Note</span>
         </button>
 
         <div className="w-[1px] h-4 bg-slate-700 mx-1" />
@@ -1130,6 +1653,45 @@ export const CanvasAdapter: React.FC = () => {
           className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
         >
           <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+
+        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+
+        <button
+          title="Toggle Timeline Animation Editor (Shift + A)"
+          onClick={() => setIsTimelineOpen(!isTimelineOpen)}
+          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer ${
+            isTimelineOpen
+              ? 'bg-amber-600 text-white shadow-md'
+              : 'text-amber-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Zap className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Timeline</span>
+        </button>
+
+        <button
+          title="Toggle Selection Manager Drawer (Shift + S)"
+          onClick={() => setIsSelectionDrawerOpen(!isSelectionDrawerOpen)}
+          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer ${
+            isSelectionDrawerOpen
+              ? 'bg-sky-600 text-white shadow-md'
+              : 'text-sky-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Boxes className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Selection</span>
+          {selectedNodeIds.length > 0 && (
+            <span
+              className={`px-1 py-0.2 rounded text-[9px] font-mono ${
+                isSelectionDrawerOpen
+                  ? 'bg-sky-800 text-white'
+                  : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+              }`}
+            >
+              {selectedNodeIds.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -1246,6 +1808,31 @@ export const CanvasAdapter: React.FC = () => {
             </button>
           )}
 
+          {/* Attach Annotation Note */}
+          <button
+            onClick={() => {
+              if (selectedNodeId && currentPage) {
+                const targetNode = currentPage.nodes.find((n) => n.id === selectedNodeId);
+                if (targetNode) {
+                  addComment({
+                    pageId: currentPage.id,
+                    nodeId: targetNode.id,
+                    x: targetNode.x + targetNode.width,
+                    y: targetNode.y,
+                    author: 'Instructional Reviewer',
+                    text: `Review note on ${targetNode.type} element`,
+                    color: 'blue',
+                  });
+                }
+              }
+            }}
+            title="Attach Annotation Note to Selected Element"
+            className="px-2.5 py-1 bg-amber-950/40 hover:bg-amber-900/70 border border-amber-600/60 text-amber-300 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+            <span>Note</span>
+          </button>
+
           {/* Bulk Delete */}
           <button
             onClick={() => {
@@ -1283,7 +1870,11 @@ export const CanvasAdapter: React.FC = () => {
         {/* Horizontal Canvas Ruler (Top Edge) */}
         {showRulers && (
           <>
-            <div className="absolute -top-6 left-0 right-0 h-6 bg-slate-900 border-b border-slate-700/80 pointer-events-none select-none z-30 overflow-hidden">
+            <div
+              className="absolute -top-6 left-0 right-0 h-6 bg-slate-900 border-b border-slate-700/80 pointer-events-auto cursor-ns-resize select-none z-30 overflow-hidden hover:bg-slate-850 transition-colors group"
+              onPointerDown={handleTopRulerPointerDown}
+              title="Click and drag down to create a horizontal magnetic guide"
+            >
               <svg className="w-full h-full">
                 {Array.from({ length: Math.floor(canvasWidth / rulerSteps.minor) + 1 }).map((_, i) => {
                   const x = i * rulerSteps.minor;
@@ -1314,6 +1905,8 @@ export const CanvasAdapter: React.FC = () => {
                     </g>
                   );
                 })}
+
+                {/* Selected Elements Extent Highlight on Ruler */}
                 {selectedNodes.map((n) => (
                   <rect
                     key={`h_mark_${n.id}`}
@@ -1325,11 +1918,48 @@ export const CanvasAdapter: React.FC = () => {
                     opacity={0.85}
                   />
                 ))}
+
+                {/* Markers for all vertical guides on Top Ruler */}
+                {(currentPage.guides || [])
+                  .filter((g) => g.orientation === 'vertical')
+                  .map((g) => (
+                    <g key={`top_ruler_guide_${g.id}`}>
+                      <polygon
+                        points={`${g.position - 3},24 ${g.position + 3},24 ${g.position},18`}
+                        fill={g.isLocked ? '#fbbf24' : '#22d3ee'}
+                      />
+                      <line
+                        x1={g.position}
+                        y1={0}
+                        x2={g.position}
+                        y2={24}
+                        stroke={g.isLocked ? '#fbbf24' : '#22d3ee'}
+                        strokeWidth={1.5}
+                      />
+                    </g>
+                  ))}
+
+                {/* Live Mouse Pointer Reticle on Top Ruler */}
+                {mousePosOnCanvas && mousePosOnCanvas.x >= 0 && mousePosOnCanvas.x <= canvasWidth && (
+                  <line
+                    x1={mousePosOnCanvas.x}
+                    y1={0}
+                    x2={mousePosOnCanvas.x}
+                    y2={24}
+                    stroke="#f43f5e"
+                    strokeWidth={1.5}
+                    opacity={0.9}
+                  />
+                )}
               </svg>
             </div>
 
             {/* Vertical Canvas Ruler (Left Edge) */}
-            <div className="absolute -left-6 top-0 bottom-0 w-6 bg-slate-900 border-r border-slate-700/80 pointer-events-none select-none z-30 overflow-hidden">
+            <div
+              className="absolute -left-6 top-0 bottom-0 w-6 bg-slate-900 border-r border-slate-700/80 pointer-events-auto cursor-ew-resize select-none z-30 overflow-hidden hover:bg-slate-850 transition-colors group"
+              onPointerDown={handleLeftRulerPointerDown}
+              title="Click and drag right to create a vertical magnetic guide"
+            >
               <svg className="w-full h-full">
                 {Array.from({ length: Math.floor(canvasHeight / rulerSteps.minor) + 1 }).map((_, i) => {
                   const y = i * rulerSteps.minor;
@@ -1362,6 +1992,8 @@ export const CanvasAdapter: React.FC = () => {
                     </g>
                   );
                 })}
+
+                {/* Selected Elements Extent Highlight on Ruler */}
                 {selectedNodes.map((n) => (
                   <rect
                     key={`v_mark_${n.id}`}
@@ -1373,26 +2005,349 @@ export const CanvasAdapter: React.FC = () => {
                     opacity={0.85}
                   />
                 ))}
+
+                {/* Markers for all horizontal guides on Left Ruler */}
+                {(currentPage.guides || [])
+                  .filter((g) => g.orientation === 'horizontal')
+                  .map((g) => (
+                    <g key={`left_ruler_guide_${g.id}`}>
+                      <polygon
+                        points={`24,${g.position - 3} 24,${g.position + 3} 18,${g.position}`}
+                        fill={g.isLocked ? '#fbbf24' : '#22d3ee'}
+                      />
+                      <line
+                        x1={0}
+                        y1={g.position}
+                        x2={24}
+                        y2={g.position}
+                        stroke={g.isLocked ? '#fbbf24' : '#22d3ee'}
+                        strokeWidth={1.5}
+                      />
+                    </g>
+                  ))}
+
+                {/* Live Mouse Pointer Reticle on Left Ruler */}
+                {mousePosOnCanvas && mousePosOnCanvas.y >= 0 && mousePosOnCanvas.y <= canvasHeight && (
+                  <line
+                    x1={0}
+                    y1={mousePosOnCanvas.y}
+                    x2={24}
+                    y2={mousePosOnCanvas.y}
+                    stroke="#f43f5e"
+                    strokeWidth={1.5}
+                    opacity={0.9}
+                  />
+                )}
               </svg>
             </div>
 
-            {/* Ruler Corner Junction (0,0) */}
-            <div className="absolute -top-6 -left-6 w-6 h-6 bg-slate-950 border-r border-b border-slate-700 flex items-center justify-center text-[8px] font-mono font-bold text-slate-400 z-30 select-none">
-              px
+            {/* Ruler Corner Junction (0,0) with Guide Presets & Show/Hide Controls */}
+            <div
+              className="absolute -top-6 -left-6 w-6 h-6 bg-slate-950 hover:bg-slate-900 border-r border-b border-slate-700 flex items-center justify-center text-[9px] font-mono font-bold text-slate-300 hover:text-sky-300 z-40 select-none cursor-pointer transition-colors shadow-md"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsRulerMenuOpen(!isRulerMenuOpen);
+              }}
+              title="Ruler & Magnetic Guide Presets Menu"
+            >
+              <Ruler className="w-3.5 h-3.5 text-sky-400" />
             </div>
+
+            {/* Ruler & Magnetic Guides Popover Menu */}
+            {isRulerMenuOpen && (
+              <div
+                className="absolute -top-6 left-2 z-50 w-56 bg-slate-900/98 backdrop-blur-md border border-slate-700 shadow-2xl rounded-xl p-2 text-xs text-slate-200 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700/80 px-1">
+                  <div className="flex items-center gap-1.5 font-bold text-white text-[11px]">
+                    <Ruler className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Rulers & Guides</span>
+                  </div>
+                  <button
+                    onClick={() => setIsRulerMenuOpen(false)}
+                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Toggle Guides & Rulers */}
+                <div className="space-y-1 mb-2 pb-2 border-b border-slate-700/80">
+                  <button
+                    onClick={() => setShowGuides(!showGuides)}
+                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-800 text-left transition-colors cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      {showGuides ? (
+                        <Eye className="w-3.5 h-3.5 text-sky-400" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      )}
+                      <span>Magnetic Guides</span>
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        showGuides ? 'bg-sky-950 text-sky-300' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {showGuides ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowRulers(!showRulers)}
+                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-slate-800 text-left transition-colors cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Ruler className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Canvas Rulers</span>
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-950 text-sky-300">
+                      ON
+                    </span>
+                  </button>
+                </div>
+
+                {/* Preset Guides */}
+                <div className="mb-2">
+                  <div className="px-2 py-1 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                    Guide Presets
+                  </div>
+                  <div className="space-y-0.5">
+                    <button
+                      onClick={() => {
+                        addPresetGuides('safe-margins');
+                        setIsRulerMenuOpen(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white text-slate-300 transition-colors cursor-pointer flex items-center justify-between"
+                    >
+                      <span>40px Safe Margins</span>
+                      <span className="text-[10px] font-mono text-slate-500">4 guides</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        addPresetGuides('center');
+                        setIsRulerMenuOpen(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white text-slate-300 transition-colors cursor-pointer flex items-center justify-between"
+                    >
+                      <span>Center Crosshair</span>
+                      <span className="text-[10px] font-mono text-slate-500">50% H / V</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        addPresetGuides('rule-of-thirds');
+                        setIsRulerMenuOpen(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white text-slate-300 transition-colors cursor-pointer flex items-center justify-between"
+                    >
+                      <span>Rule of Thirds</span>
+                      <span className="text-[10px] font-mono text-slate-500">3x3 Grid</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        addPresetGuides('quads');
+                        setIsRulerMenuOpen(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white text-slate-300 transition-colors cursor-pointer flex items-center justify-between"
+                    >
+                      <span>Quarter Grid</span>
+                      <span className="text-[10px] font-mono text-slate-500">2x2 Quads</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Clear All Guides */}
+                <div className="pt-1 border-t border-slate-700/80">
+                  <button
+                    onClick={() => {
+                      clearAllGuides();
+                      setIsRulerMenuOpen(false);
+                    }}
+                    disabled={!currentPage.guides || currentPage.guides.length === 0}
+                    className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-rose-950/70 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer disabled:opacity-35 disabled:pointer-events-none"
+                  >
+                    <span>Clear All Guides</span>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 
-        {/* Smart Guide Alignment Lines Overlay */}
+        {/* Persistent User-Created Magnetic Guides */}
+        {showGuides &&
+          (currentPage.guides || []).map((guide) => {
+            const isHoriz = guide.orientation === 'horizontal';
+            const isHovered = hoveredGuideId === guide.id;
+
+            if (isHoriz) {
+              return (
+                <div
+                  key={`guide_h_${guide.id}`}
+                  className={`absolute left-0 right-0 z-40 group select-none ${
+                    guide.isLocked ? 'cursor-default' : 'cursor-ns-resize'
+                  }`}
+                  style={{ top: `${guide.position}px` }}
+                  onPointerDown={(e) => handleGuidePointerDown(e, guide)}
+                  onMouseEnter={() => setHoveredGuideId(guide.id)}
+                  onMouseLeave={() => setHoveredGuideId(null)}
+                >
+                  {/* Hit Target */}
+                  <div className="absolute -top-2 left-0 right-0 h-4" />
+
+                  {/* Visual Guide Line */}
+                  <div
+                    className={`h-[1px] w-full transition-all ${
+                      isHovered
+                        ? 'h-[2px] bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]'
+                        : guide.isLocked
+                        ? 'bg-amber-400/80 border-t border-dashed border-amber-400'
+                        : 'bg-cyan-400/90 shadow-[0_0_4px_rgba(34,211,238,0.5)]'
+                    }`}
+                  />
+
+                  {/* Guide Info & Action Badge on Hover */}
+                  {(isHovered || guide.isLocked) && (
+                    <div
+                      className="absolute top-1 left-4 z-50 bg-slate-900/95 border border-cyan-500/70 text-cyan-200 text-[10px] font-mono px-2 py-0.5 rounded shadow-xl flex items-center gap-1.5 backdrop-blur-xs select-none pointer-events-auto"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <span className="font-bold text-cyan-400">Y: {guide.position}px</span>
+                      <button
+                        title={guide.isLocked ? 'Unlock Guide' : 'Lock Guide'}
+                        onClick={() => toggleLockGuide(guide.id)}
+                        className={`p-0.5 rounded hover:bg-slate-800 transition-colors ${
+                          guide.isLocked ? 'text-amber-400' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {guide.isLocked ? <Lock className="w-2.5 h-2.5" /> : <Unlock className="w-2.5 h-2.5" />}
+                      </button>
+                      {!guide.isLocked && (
+                        <button
+                          title="Delete Guide"
+                          onClick={() => deleteGuide(guide.id)}
+                          className="p-0.5 rounded hover:bg-rose-950 text-rose-400 hover:text-rose-300 transition-colors"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={`guide_v_${guide.id}`}
+                className={`absolute top-0 bottom-0 z-40 group select-none ${
+                  guide.isLocked ? 'cursor-default' : 'cursor-ew-resize'
+                }`}
+                style={{ left: `${guide.position}px` }}
+                onPointerDown={(e) => handleGuidePointerDown(e, guide)}
+                onMouseEnter={() => setHoveredGuideId(guide.id)}
+                onMouseLeave={() => setHoveredGuideId(null)}
+              >
+                {/* Hit Target */}
+                <div className="absolute -left-2 top-0 bottom-0 w-4" />
+
+                {/* Visual Guide Line */}
+                <div
+                  className={`w-[1px] h-full transition-all ${
+                    isHovered
+                      ? 'w-[2px] bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]'
+                      : guide.isLocked
+                      ? 'bg-amber-400/80 border-l border-dashed border-amber-400'
+                      : 'bg-cyan-400/90 shadow-[0_0_4px_rgba(34,211,238,0.5)]'
+                  }`}
+                />
+
+                {/* Guide Info & Action Badge on Hover */}
+                {(isHovered || guide.isLocked) && (
+                  <div
+                    className="absolute top-4 left-1 z-50 bg-slate-900/95 border border-cyan-500/70 text-cyan-200 text-[10px] font-mono px-2 py-0.5 rounded shadow-xl flex items-center gap-1.5 backdrop-blur-xs select-none pointer-events-auto"
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="font-bold text-cyan-400">X: {guide.position}px</span>
+                    <button
+                      title={guide.isLocked ? 'Unlock Guide' : 'Lock Guide'}
+                      onClick={() => toggleLockGuide(guide.id)}
+                      className={`p-0.5 rounded hover:bg-slate-800 transition-colors ${
+                        guide.isLocked ? 'text-amber-400' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {guide.isLocked ? <Lock className="w-2.5 h-2.5" /> : <Unlock className="w-2.5 h-2.5" />}
+                    </button>
+                    {!guide.isLocked && (
+                      <button
+                        title="Delete Guide"
+                        onClick={() => deleteGuide(guide.id)}
+                        className="p-0.5 rounded hover:bg-rose-950 text-rose-400 hover:text-rose-300 transition-colors"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+        {/* Live Dragging Guide Preview Overlay */}
+        {draggingGuide && (
+          <div
+            className={`absolute pointer-events-none z-50 ${
+              draggingGuide.orientation === 'horizontal'
+                ? 'left-0 right-0 h-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,1)]'
+                : 'top-0 bottom-0 w-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,1)]'
+            }`}
+            style={
+              draggingGuide.orientation === 'horizontal'
+                ? { top: `${draggingGuide.position}px` }
+                : { left: `${draggingGuide.position}px` }
+            }
+          >
+            <div
+              className={`absolute font-mono text-[10px] font-bold px-2 py-0.5 rounded shadow-2xl backdrop-blur-xs flex items-center gap-1 whitespace-nowrap bg-cyan-950 text-cyan-200 border border-cyan-400 ${
+                draggingGuide.orientation === 'horizontal' ? 'top-1.5 left-6' : 'top-6 left-1.5'
+              }`}
+            >
+              <span>
+                {draggingGuide.orientation === 'horizontal' ? 'Y:' : 'X:'} {draggingGuide.position}px
+              </span>
+              {(draggingGuide.position < 0 ||
+                (draggingGuide.orientation === 'horizontal' && draggingGuide.position > canvasHeight) ||
+                (draggingGuide.orientation === 'vertical' && draggingGuide.position > canvasWidth)) && (
+                <span className="text-rose-400 text-[9px] font-normal ml-1">(Drop to delete)</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Smart Guide & Tide-Snap Alignment Lines Overlay */}
         {showGuides &&
           smartGuidesX.map((guide, idx) => {
             const isPage = guide.type === 'page-edge' || guide.type === 'page-center';
             const isGrid = guide.type === 'grid';
+            const isGuide = guide.type === 'guide';
+            const isTideSnap = guide.type === 'tide-snap';
+            const isSmartSpacing = guide.type === 'smart-spacing';
             return (
               <div
                 key={`sg_x_${idx}_${guide.val}_${guide.type}`}
                 className={`absolute top-0 bottom-0 pointer-events-none z-50 animate-in fade-in duration-75 ${
-                  isGrid
+                  isTideSnap
+                    ? 'w-[2px] bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]'
+                    : isSmartSpacing
+                    ? 'w-[2px] bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.95)]'
+                    : isGuide
+                    ? 'w-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,1)]'
+                    : isGrid
                     ? 'w-[1.5px] border-l border-dashed border-sky-400 opacity-90'
                     : isPage
                     ? 'w-[1.5px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]'
@@ -1402,15 +2357,22 @@ export const CanvasAdapter: React.FC = () => {
               >
                 <div
                   className={`absolute top-1 left-1 font-mono text-[9px] font-semibold px-1.5 py-0.5 rounded shadow-lg backdrop-blur-xs flex items-center gap-1 whitespace-nowrap ${
-                    isGrid
+                    isTideSnap
+                      ? 'bg-emerald-950/98 text-emerald-200 border border-emerald-400 shadow-emerald-900/50 font-bold'
+                      : isSmartSpacing
+                      ? 'bg-purple-950/98 text-purple-200 border border-purple-400 shadow-purple-900/50 font-bold'
+                      : isGuide
+                      ? 'bg-cyan-950/98 text-cyan-200 border border-cyan-400 shadow-cyan-900/50'
+                      : isGrid
                       ? 'bg-slate-900/95 text-sky-300 border border-sky-500/50'
                       : isPage
                       ? 'bg-cyan-950/95 text-cyan-200 border border-cyan-500/60'
                       : 'bg-fuchsia-950/95 text-fuchsia-200 border border-fuchsia-500/60'
                   }`}
                 >
+                  {isTideSnap && <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" />}
                   <span>{guide.label}</span>
-                  <span className={isGrid ? 'text-sky-400' : isPage ? 'text-cyan-400' : 'text-fuchsia-400'}>
+                  <span className={isTideSnap ? 'text-emerald-300' : isSmartSpacing ? 'text-purple-300' : isGuide || isPage ? 'text-cyan-400' : isGrid ? 'text-sky-400' : 'text-fuchsia-400'}>
                     ({guide.val}px)
                   </span>
                 </div>
@@ -1421,11 +2383,20 @@ export const CanvasAdapter: React.FC = () => {
           smartGuidesY.map((guide, idx) => {
             const isPage = guide.type === 'page-edge' || guide.type === 'page-center';
             const isGrid = guide.type === 'grid';
+            const isGuide = guide.type === 'guide';
+            const isTideSnap = guide.type === 'tide-snap';
+            const isSmartSpacing = guide.type === 'smart-spacing';
             return (
               <div
                 key={`sg_y_${idx}_${guide.val}_${guide.type}`}
                 className={`absolute left-0 right-0 pointer-events-none z-50 animate-in fade-in duration-75 ${
-                  isGrid
+                  isTideSnap
+                    ? 'h-[2px] bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.95)]'
+                    : isSmartSpacing
+                    ? 'h-[2px] bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.95)]'
+                    : isGuide
+                    ? 'h-[2px] bg-cyan-300 shadow-[0_0_12px_rgba(34,211,238,1)]'
+                    : isGrid
                     ? 'h-[1.5px] border-t border-dashed border-sky-400 opacity-90'
                     : isPage
                     ? 'h-[1.5px] bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]'
@@ -1435,15 +2406,22 @@ export const CanvasAdapter: React.FC = () => {
               >
                 <div
                   className={`absolute top-1 left-1 font-mono text-[9px] font-semibold px-1.5 py-0.5 rounded shadow-lg backdrop-blur-xs flex items-center gap-1 whitespace-nowrap ${
-                    isGrid
+                    isTideSnap
+                      ? 'bg-emerald-950/98 text-emerald-200 border border-emerald-400 shadow-emerald-900/50 font-bold'
+                      : isSmartSpacing
+                      ? 'bg-purple-950/98 text-purple-200 border border-purple-400 shadow-purple-900/50 font-bold'
+                      : isGuide
+                      ? 'bg-cyan-950/98 text-cyan-200 border border-cyan-400 shadow-cyan-900/50'
+                      : isGrid
                       ? 'bg-slate-900/95 text-sky-300 border border-sky-500/50'
                       : isPage
                       ? 'bg-cyan-950/95 text-cyan-200 border border-cyan-500/60'
                       : 'bg-fuchsia-950/95 text-fuchsia-200 border border-fuchsia-500/60'
                   }`}
                 >
+                  {isTideSnap && <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" />}
                   <span>{guide.label}</span>
-                  <span className={isGrid ? 'text-sky-400' : isPage ? 'text-cyan-400' : 'text-fuchsia-400'}>
+                  <span className={isTideSnap ? 'text-emerald-300' : isSmartSpacing ? 'text-purple-300' : isGuide || isPage ? 'text-cyan-400' : isGrid ? 'text-sky-400' : 'text-fuchsia-400'}>
                     ({guide.val}px)
                   </span>
                 </div>
@@ -1533,10 +2511,17 @@ export const CanvasAdapter: React.FC = () => {
               height: `${groupBounds.maxY - groupBounds.minY + 12}px`,
             }}
             onPointerDown={handleMultiSelectionPointerDown}
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Floating Multi-Selection Action HUD Toolbar */}
             <div
               className="absolute -top-11 left-1/2 -translate-x-1/2 bg-slate-900/98 backdrop-blur-md text-white px-2.5 py-1 rounded-xl border border-slate-700/90 shadow-2xl flex items-center gap-1.5 pointer-events-auto text-xs select-none"
+              onPointerDown={(e) => {
+                const targetEl = e.target as HTMLElement;
+                if (targetEl.closest('button')) {
+                  e.stopPropagation();
+                }
+              }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-1 text-[11px] font-bold text-sky-300 px-1 cursor-grab active:cursor-grabbing">
@@ -1636,6 +2621,44 @@ export const CanvasAdapter: React.FC = () => {
 
               <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
 
+              {/* Save Group to Resource Library */}
+              <button
+                onClick={() => {
+                  setSaveResourceName(
+                    isSelectedGrouped ? 'Grouped Interaction Pattern' : 'Custom Pattern Group'
+                  );
+                  setSaveResourceCategory('patterns');
+                  setIsSaveResourcePopoverOpen(true);
+                }}
+                title="Save Selection to Resource Library"
+                className="px-2 py-1 bg-sky-600/90 hover:bg-sky-500 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <FolderHeart className="w-3.5 h-3.5" />
+                <span>Save Resource</span>
+              </button>
+
+              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+              {/* Scale Quick Presets */}
+              <div className="flex items-center gap-0.5">
+                <button
+                  onClick={() => scaleGroup(selectedNodeIds, 0.9)}
+                  title="Scale Down Group (90%)"
+                  className="px-1.5 py-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded text-[10px] font-mono transition-colors cursor-pointer"
+                >
+                  -10%
+                </button>
+                <button
+                  onClick={() => scaleGroup(selectedNodeIds, 1.1)}
+                  title="Scale Up Group (110%)"
+                  className="px-1.5 py-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded text-[10px] font-mono transition-colors cursor-pointer"
+                >
+                  +10%
+                </button>
+              </div>
+
+              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
               {/* Bulk Delete Button */}
               <button
                 onClick={() => {
@@ -1647,6 +2670,37 @@ export const CanvasAdapter: React.FC = () => {
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* 8 Interactive Parent Entity Resize Handles for Uniform & Directional Transformation */}
+            {(
+              [
+                { handle: 'nw', size: 'w-3.5 h-3.5 -top-1.5 -left-1.5', cursor: 'nwse-resize', title: 'Resize Group NW (Hold Shift to keep ratio)' },
+                { handle: 'n', size: 'w-6 h-2.5 -top-1.5 left-1/2 -translate-x-1/2', cursor: 'ns-resize', title: 'Resize Group Top Edge (N)' },
+                { handle: 'ne', size: 'w-3.5 h-3.5 -top-1.5 -right-1.5', cursor: 'nesw-resize', title: 'Resize Group NE (Hold Shift to keep ratio)' },
+                { handle: 'e', size: 'w-2.5 h-6 top-1/2 -right-1.5 -translate-y-1/2', cursor: 'ew-resize', title: 'Resize Group Right Edge (E)' },
+                { handle: 'se', size: 'w-3.5 h-3.5 -bottom-1.5 -right-1.5', cursor: 'nwse-resize', title: 'Resize Group SE (Hold Shift to keep ratio)' },
+                { handle: 's', size: 'w-6 h-2.5 -bottom-1.5 left-1/2 -translate-x-1/2', cursor: 'ns-resize', title: 'Resize Group Bottom Edge (S)' },
+                { handle: 'sw', size: 'w-3.5 h-3.5 -bottom-1.5 -left-1.5', cursor: 'nesw-resize', title: 'Resize Group SW (Hold Shift to keep ratio)' },
+                { handle: 'w', size: 'w-2.5 h-6 top-1/2 -left-1.5 -translate-y-1/2', cursor: 'ew-resize', title: 'Resize Group Left Edge (W)' },
+              ] as { handle: ResizeHandle; size: string; cursor: string; title: string }[]
+            ).map(({ handle, size, cursor, title }) => (
+              <div
+                key={handle}
+                data-resize-handle={handle}
+                className={`absolute ${size} z-50 bg-sky-400 border-2 border-slate-900 rounded-xs shadow-md hover:scale-125 hover:bg-white hover:border-sky-500 transition-transform`}
+                style={{ cursor }}
+                onPointerDown={(e) => handleGroupResizePointerDown(e, handle, groupBounds)}
+                onClick={(e) => e.stopPropagation()}
+                title={title}
+              />
+            ))}
+
+            {/* Parent Entity Live Coordinate & Dimension Badge */}
+            <div className="absolute -bottom-6 right-0 z-50 bg-slate-900/95 text-sky-300 border border-slate-700/80 text-[10px] font-mono px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap">
+              X:{Math.round(groupBounds.minX)} Y:{Math.round(groupBounds.minY)} •{' '}
+              {Math.round(groupBounds.maxX - groupBounds.minX)} ×{' '}
+              {Math.round(groupBounds.maxY - groupBounds.minY)}px
+            </div>
           </div>
         )}
 
@@ -1654,6 +2708,10 @@ export const CanvasAdapter: React.FC = () => {
         {currentPage.nodes.map((node) => {
           const isSelected = selectedNodeIds.includes(node.id);
           const isPrimarySelected = node.id === selectedNodeId;
+          const isTransformingThisNode =
+            dragState?.nodeId === node.id ||
+            (dragState?.initialNodesMap && Boolean(dragState.initialNodesMap[node.id]));
+          const animEval = evaluateNodeAnimationAtTime(node.animation, liveScrubTime);
 
           return (
             <div
@@ -1666,13 +2724,12 @@ export const CanvasAdapter: React.FC = () => {
                 height: `${node.height}px`,
                 zIndex: node.zIndex || 1,
                 display: node.isHidden ? 'none' : 'block',
+                ...animEval.style,
               }}
               onPointerDown={(e) => handleNodePointerDown(e, node)}
               onClick={(e) => {
                 e.stopPropagation();
-                if (e.shiftKey) {
-                  toggleNodeSelection(node.id);
-                } else {
+                if (!didDragMoveRef.current && !e.shiftKey && selectedNodeIds.length > 1 && !node.groupId) {
                   setSelectedNodeId(node.id);
                 }
               }}
@@ -1692,6 +2749,8 @@ export const CanvasAdapter: React.FC = () => {
                 <TextNodeRenderer
                   node={node as TextNode}
                   isSelected={isSelected}
+                  variables={course.variables}
+                  showVariablePreview={showVariablePreview}
                   onUpdateContent={(content) => updateNode(node.id, { content })}
                 />
               )}
@@ -1713,23 +2772,32 @@ export const CanvasAdapter: React.FC = () => {
                     } pointer-events-none rounded-[3px] transition-all`}
                   />
 
-                  {/* Active Selection Dimensions & Type Badge */}
+                  {/* Active Selection Coordinates & Dimensions Badge */}
                   <div
-                    className={`absolute -bottom-6 left-0 text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded shadow-md pointer-events-none z-50 flex items-center gap-1.5 ${
+                    className={`absolute -bottom-6 left-0 text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded shadow-md pointer-events-none z-50 flex items-center gap-1.5 whitespace-nowrap ${
                       node.isLocked
                         ? 'bg-amber-950/95 text-amber-200 border border-amber-500/60'
+                        : isTransformingThisNode
+                        ? 'bg-blue-600 text-white border border-blue-400'
                         : 'bg-slate-900/95 text-sky-300 border border-slate-700/80'
                     }`}
                   >
-                    <span className="uppercase text-[9px] font-bold text-slate-400">{node.type}</span>
-                    <span className="text-slate-600">•</span>
-                    <span>{Math.round(node.width)}×{Math.round(node.height)}px</span>
+                    <span className="uppercase text-[9px] font-bold opacity-75">{node.type}</span>
+                    <span className="opacity-40">•</span>
+                    <span>
+                      X:{Math.round(node.x)} Y:{Math.round(node.y)}
+                    </span>
+                    <span className="opacity-40">•</span>
+                    <span>
+                      {Math.round(node.width)}×{Math.round(node.height)}px
+                    </span>
                   </div>
 
                   {/* Floating Action Pill (When single node is primary selection) */}
                   {isPrimarySelected && !isMultiSelection && (
                     <div
                       className="absolute -top-11 left-1/2 -translate-x-1/2 bg-slate-900/95 backdrop-blur-md text-white px-2 py-1 rounded-lg border border-slate-700/80 shadow-xl flex items-center gap-1 z-50"
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <button
@@ -1781,24 +2849,69 @@ export const CanvasAdapter: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 8 Resize Handles */}
+                  {/* 8 Corner & Edge Resize Handles */}
                   {!isMultiSelection &&
                     !node.isLocked &&
-                    [
-                      { handle: 'nw', cursor: 'nwse-resize', pos: '-top-1.5 -left-1.5' },
-                      { handle: 'n', cursor: 'ns-resize', pos: '-top-1.5 left-1/2 -translate-x-1/2' },
-                      { handle: 'ne', cursor: 'nesw-resize', pos: '-top-1.5 -right-1.5' },
-                      { handle: 'e', cursor: 'ew-resize', pos: 'top-1/2 -right-1.5 -translate-y-1/2' },
-                      { handle: 'se', cursor: 'nwse-resize', pos: '-bottom-1.5 -right-1.5' },
-                      { handle: 's', cursor: 'ns-resize', pos: '-bottom-1.5 left-1/2 -translate-x-1/2' },
-                      { handle: 'sw', cursor: 'nesw-resize', pos: '-bottom-1.5 -left-1.5' },
-                      { handle: 'w', cursor: 'ew-resize', pos: 'top-1/2 -left-1.5 -translate-y-1/2' },
-                    ].map(({ handle, cursor, pos }) => (
+                    (
+                      [
+                        {
+                          handle: 'nw',
+                          cursor: 'nwse-resize',
+                          pos: 'w-3 h-3 -top-1.5 -left-1.5',
+                          title: 'Resize NW Corner (Hold Shift to keep ratio)',
+                        },
+                        {
+                          handle: 'n',
+                          cursor: 'ns-resize',
+                          pos: 'w-5 h-2.5 -top-1.5 left-1/2 -translate-x-1/2',
+                          title: 'Resize Top Edge',
+                        },
+                        {
+                          handle: 'ne',
+                          cursor: 'nesw-resize',
+                          pos: 'w-3 h-3 -top-1.5 -right-1.5',
+                          title: 'Resize NE Corner (Hold Shift to keep ratio)',
+                        },
+                        {
+                          handle: 'e',
+                          cursor: 'ew-resize',
+                          pos: 'w-2.5 h-5 top-1/2 -right-1.5 -translate-y-1/2',
+                          title: 'Resize Right Edge',
+                        },
+                        {
+                          handle: 'se',
+                          cursor: 'nwse-resize',
+                          pos: 'w-3 h-3 -bottom-1.5 -right-1.5',
+                          title: 'Resize SE Corner (Hold Shift to keep ratio)',
+                        },
+                        {
+                          handle: 's',
+                          cursor: 'ns-resize',
+                          pos: 'w-5 h-2.5 -bottom-1.5 left-1/2 -translate-x-1/2',
+                          title: 'Resize Bottom Edge',
+                        },
+                        {
+                          handle: 'sw',
+                          cursor: 'nesw-resize',
+                          pos: 'w-3 h-3 -bottom-1.5 -left-1.5',
+                          title: 'Resize SW Corner (Hold Shift to keep ratio)',
+                        },
+                        {
+                          handle: 'w',
+                          cursor: 'ew-resize',
+                          pos: 'w-2.5 h-5 top-1/2 -left-1.5 -translate-y-1/2',
+                          title: 'Resize Left Edge',
+                        },
+                      ] as { handle: ResizeHandle; cursor: string; pos: string; title: string }[]
+                    ).map(({ handle, cursor, pos, title }) => (
                       <div
                         key={handle}
-                        className={`absolute w-3 h-3 bg-white border-2 border-blue-600 rounded-sm shadow-xs ${pos}`}
+                        data-resize-handle={handle}
+                        title={title}
+                        className={`absolute z-50 bg-white border-2 border-blue-600 rounded-xs shadow-md hover:scale-125 hover:bg-blue-500 hover:border-white transition-transform ${pos}`}
                         style={{ cursor }}
                         onPointerDown={(e) => handleResizePointerDown(e, node.id, handle)}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     ))}
                 </>
@@ -1840,28 +2953,104 @@ export const CanvasAdapter: React.FC = () => {
         </div>
       )}
 
-      {/* Bottom-Right Floating Zoom Level Controls HUD */}
+      {/* Movable Floating Zoom Level Controls HUD */}
       <div
-        className="absolute bottom-5 right-6 z-40 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5 text-xs text-white select-none"
+        ref={zoomHudRef}
+        style={
+          hudPositions.zoomHud
+            ? { left: `${hudPositions.zoomHud.x}px`, top: `${hudPositions.zoomHud.y}px` }
+            : undefined
+        }
+        onPointerDown={(e) => startHudDrag('zoomHud', e)}
+        className={`absolute z-40 bg-slate-900/95 backdrop-blur-md border rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5 text-xs text-white select-none transition-shadow ${
+          hudPositions.zoomHud ? '' : 'bottom-5 right-6'
+        } ${
+          draggingHud?.target === 'zoomHud'
+            ? 'border-sky-500/80 ring-2 ring-sky-500/20 cursor-grabbing'
+            : 'border-slate-700/80'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
+        <div
+          role="button"
+          tabIndex={0}
+          onPointerDown={(e) => startHudDrag('zoomHud', e, true)}
+          onDoubleClick={() => resetHudPosition('zoomHud')}
+          title="Drag to move zoom controls (double-click to reset position)"
+          className="px-0.5 py-1 text-slate-500 hover:text-slate-200 cursor-grab active:cursor-grabbing rounded flex items-center justify-center shrink-0"
+        >
+          <GripVertical className="w-3.5 h-3.5" />
+        </div>
+
         <button
-          title="Zoom Out"
+          title="Zoom Out (Ctrl -)"
           onClick={() => setZoom(Math.max(0.4, zoom - 0.1))}
           className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
 
-        <span
-          title="Current Zoom Level"
-          className="text-xs font-mono font-bold text-sky-400 min-w-[46px] text-center"
-        >
-          {Math.round(zoom * 100)}%
-        </span>
+        {/* Clickable Percentage Indicator with Quick Preset Dropdown */}
+        <div className="relative" data-hud-menu="true">
+          <button
+            title="Select Zoom Preset Level"
+            onClick={() => setIsZoomMenuOpen(!isZoomMenuOpen)}
+            className="px-2 py-1 bg-slate-800/90 hover:bg-slate-700 rounded-lg text-xs font-mono font-bold text-sky-400 border border-slate-700 hover:border-sky-500/50 transition-colors flex items-center gap-1 cursor-pointer min-w-[56px] justify-center"
+          >
+            <span>{Math.round(zoom * 100)}%</span>
+          </button>
+
+          {/* Preset Zoom Dropdown Popover */}
+          {isZoomMenuOpen && (
+            <div
+              className={`absolute right-0 z-50 w-36 bg-slate-900/98 border border-slate-700 shadow-2xl rounded-xl p-1 text-xs text-slate-200 animate-in fade-in zoom-in-95 duration-100 ${
+                hudPositions.zoomHud && hudPositions.zoomHud.y < 240 ? 'top-9' : 'bottom-9'
+              }`}
+            >
+              <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase border-b border-slate-800 mb-1">
+                Zoom Level
+              </div>
+              {[
+                { label: '50%', value: 0.5 },
+                { label: '75%', value: 0.75 },
+                { label: '100% (Reset)', value: 1.0 },
+                { label: '125%', value: 1.25 },
+                { label: '150%', value: 1.5 },
+                { label: '200%', value: 2.0 },
+              ].map((opt) => (
+                <button
+                  key={opt.label}
+                  onClick={() => {
+                    setZoom(opt.value);
+                    setIsZoomMenuOpen(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-1 rounded-lg text-xs font-mono transition-colors flex items-center justify-between cursor-pointer ${
+                    Math.abs(zoom - opt.value) < 0.02
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'hover:bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                </button>
+              ))}
+              <div className="pt-1 mt-1 border-t border-slate-800">
+                <button
+                  onClick={() => {
+                    handleFitToScreen();
+                    setIsZoomMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1 rounded-lg text-xs text-sky-300 hover:bg-slate-800 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer"
+                >
+                  <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Fit to Screen</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <button
-          title="Zoom In"
+          title="Zoom In (Ctrl +)"
           onClick={() => setZoom(Math.min(2.0, zoom + 0.1))}
           className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
         >
@@ -1944,8 +3133,147 @@ export const CanvasAdapter: React.FC = () => {
             }
           }}
           onAlign={(type) => alignSelected(type)}
+          onSaveToMyAssets={() => {
+            const isGroup = selectedNodeIds.length > 1;
+            setSaveResourceName(isGroup ? 'Custom Pattern Group' : 'Custom Resource');
+            setSaveResourceCategory(isGroup ? 'patterns' : 'shapes');
+            setIsSaveResourcePopoverOpen(true);
+          }}
         />
       )}
+
+      {/* Inline Save-to-Resource-Library Popover (no browser prompt) */}
+      {isSaveResourcePopoverOpen && (
+        <div
+          className="absolute top-16 right-6 z-50 w-72 bg-slate-900/98 backdrop-blur-md border border-cyan-500/50 rounded-xl p-3 shadow-2xl text-xs text-slate-200 space-y-2.5"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <div className="flex items-center gap-1.5 font-bold text-cyan-300">
+              <FolderHeart className="w-4 h-4 text-cyan-400" />
+              <span>Save to Resource Library</span>
+            </div>
+            <button
+              onClick={() => setIsSaveResourcePopoverOpen(false)}
+              className="text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!saveResourceName.trim()) return;
+              const targetIds =
+                selectedNodeIds.length > 0
+                  ? selectedNodeIds
+                  : selectedNodeId
+                  ? [selectedNodeId]
+                  : [];
+              const saved = saveSelectionToMyAssets(
+                saveResourceName.trim(),
+                saveResourceCategory,
+                targetIds
+              );
+              if (saved) {
+                setIsSaveResourcePopoverOpen(false);
+                setLayoutToast(`Saved "${saved.name}" to Resource Library!`);
+                setTimeout(() => setLayoutToast(null), 2500);
+              }
+            }}
+            className="space-y-2"
+          >
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-0.5">Resource Name</label>
+              <input
+                type="text"
+                value={saveResourceName}
+                onChange={(e) => setSaveResourceName(e.target.value)}
+                autoFocus
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white outline-none focus:border-cyan-500"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-0.5">Category</label>
+              <select
+                value={saveResourceCategory}
+                onChange={(e) =>
+                  setSaveResourceCategory(
+                    e.target.value as 'patterns' | 'shapes' | 'icons' | 'cards' | 'groups'
+                  )
+                }
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-cyan-500"
+              >
+                <option value="patterns">Interaction Pattern</option>
+                <option value="shapes">Custom Shape</option>
+                <option value="icons">Branded Icon</option>
+                <option value="cards">Callout / Card</option>
+                <option value="groups">Reusable Group</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsSaveResourcePopoverOpen(false)}
+                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!saveResourceName.trim()}
+                className="px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Docked Right-Side Edge Handle for Selection Manager when closed */}
+      {!isSelectionDrawerOpen && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsSelectionDrawerOpen(true);
+          }}
+          title="Open Selection Manager Drawer (Shift + S)"
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-30 bg-slate-900/95 hover:bg-slate-800 border border-r-0 border-slate-700/90 rounded-l-xl px-1.5 py-3 shadow-2xl flex flex-col items-center gap-1.5 text-[10px] font-bold text-sky-400 hover:text-white transition-colors cursor-pointer"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+          <Boxes className="w-3.5 h-3.5" />
+          {selectedNodeIds.length > 0 && (
+            <span className="px-1 py-0.5 rounded bg-sky-600 text-white font-mono text-[9px] leading-none">
+              {selectedNodeIds.length}
+            </span>
+          )}
+        </button>
+      )}
+      </div>
+
+      {/* Side-Docked Selection Manager Drawer */}
+      <SelectionManagerDrawer
+        isOpen={isSelectionDrawerOpen}
+        onClose={() => setIsSelectionDrawerOpen(false)}
+        onNotify={(msg) => {
+          setLayoutToast(msg);
+          setTimeout(() => setLayoutToast(null), 2500);
+        }}
+      />
+      </div>
+
+      {/* Bottom Docked Interactive Timeline Animation Editor */}
+      <TimelineDrawer
+        isOpen={isTimelineOpen}
+        onClose={() => setIsTimelineOpen(false)}
+        onScrubTimeChange={(time) => setLiveScrubTime(time)}
+      />
+
+      {/* Bottom Docked Per-Slide Speaker Notes Editor */}
+      <SpeakerNotesDrawer />
     </div>
   );
 };

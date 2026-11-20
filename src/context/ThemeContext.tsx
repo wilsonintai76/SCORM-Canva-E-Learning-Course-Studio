@@ -9,9 +9,23 @@ export const DARK_THEME_DEFAULT: GlobalTheme = {
   secondaryColor: '#4f46e5',
   accentColor: '#06b6d4',
   backgroundColor: '#0f172a',
+  surfaceColor: '#1e293b',
+  textColor: '#f8fafc',
   fontFamily: 'Inter, sans-serif',
   headingFontFamily: 'Inter, sans-serif',
   bodyFontFamily: 'Inter, sans-serif',
+  typography: {
+    headingSize: 32,
+    subheadingSize: 22,
+    bodySize: 16,
+    lineHeight: 1.4,
+  },
+  spacing: {
+    slideMargin: 40,
+    elementGap: 16,
+    cardPadding: 16,
+    borderRadius: 12,
+  },
   logoUrl: '',
   logoPosition: 'top-left',
 };
@@ -21,9 +35,23 @@ export const LIGHT_THEME_DEFAULT: GlobalTheme = {
   secondaryColor: '#0f766e',
   accentColor: '#38bdf8',
   backgroundColor: '#f8fafc',
+  surfaceColor: '#ffffff',
+  textColor: '#0f172a',
   fontFamily: 'Roboto, sans-serif',
   headingFontFamily: 'Roboto, sans-serif',
   bodyFontFamily: 'Roboto, sans-serif',
+  typography: {
+    headingSize: 32,
+    subheadingSize: 22,
+    bodySize: 16,
+    lineHeight: 1.4,
+  },
+  spacing: {
+    slideMargin: 40,
+    elementGap: 16,
+    cardPadding: 16,
+    borderRadius: 12,
+  },
   logoUrl: '',
   logoPosition: 'top-left',
 };
@@ -34,7 +62,12 @@ export interface ThemeContextType {
   setThemeMode: (mode: ThemeMode) => void;
   updateThemeTokens: (
     tokens: GlobalTheme,
-    options?: { applyBackgroundToPages?: boolean; applyLogoToPages?: boolean }
+    options?: {
+      applyBackgroundToPages?: boolean;
+      applyLogoToPages?: boolean;
+      applyTypographyToPages?: boolean;
+      applySpacingToPages?: boolean;
+    }
   ) => void;
   resetTheme: () => void;
 }
@@ -63,7 +96,18 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (savedTokens) {
         const parsed = JSON.parse(savedTokens);
         if (parsed && typeof parsed === 'object') {
-          return parsed;
+          return {
+            ...DARK_THEME_DEFAULT,
+            ...parsed,
+            typography: {
+              ...DARK_THEME_DEFAULT.typography,
+              ...(parsed.typography || {}),
+            },
+            spacing: {
+              ...DARK_THEME_DEFAULT.spacing,
+              ...(parsed.spacing || {}),
+            },
+          };
         }
       }
     } catch {
@@ -72,11 +116,21 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return DARK_THEME_DEFAULT;
   });
 
-  // Apply theme tokens to DOM root element & sync with global course store
-  const applyDOMAndStore = (mode: ThemeMode, tokens: GlobalTheme, cascadeToPages = false) => {
+  // Apply theme tokens to DOM root element & optionally cascade to global course store
+  const applyDOMAndStore = (
+    mode: ThemeMode,
+    tokens: GlobalTheme,
+    options?: {
+      cascadeToPages?: boolean;
+      applyBackgroundToPages?: boolean;
+      applyLogoToPages?: boolean;
+      applyTypographyToPages?: boolean;
+      applySpacingToPages?: boolean;
+    }
+  ) => {
     const root = document.documentElement;
     root.setAttribute('data-theme', mode);
-    
+
     if (mode === 'dark') {
       root.classList.add('dark');
       root.classList.remove('light');
@@ -92,16 +146,29 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     root.style.setProperty('--secondary-color', tokens.secondaryColor);
     root.style.setProperty('--accent-color', tokens.accentColor);
     root.style.setProperty('--bg-color', tokens.backgroundColor);
+    root.style.setProperty('--surface-color', tokens.surfaceColor || '#1e293b');
+    root.style.setProperty('--text-color', tokens.textColor || '#f8fafc');
     root.style.setProperty('--font-family', tokens.fontFamily || 'Inter, sans-serif');
+    root.style.setProperty('--heading-font', tokens.headingFontFamily || tokens.fontFamily || 'Inter, sans-serif');
+    root.style.setProperty('--body-font', tokens.bodyFontFamily || tokens.fontFamily || 'Inter, sans-serif');
+    root.style.setProperty('--heading-size', `${tokens.typography?.headingSize ?? 32}px`);
+    root.style.setProperty('--body-size', `${tokens.typography?.bodySize ?? 16}px`);
+    root.style.setProperty('--slide-margin', `${tokens.spacing?.slideMargin ?? 40}px`);
+    root.style.setProperty('--element-gap', `${tokens.spacing?.elementGap ?? 16}px`);
+    root.style.setProperty('--card-padding', `${tokens.spacing?.cardPadding ?? 16}px`);
+    root.style.setProperty('--border-radius', `${tokens.spacing?.borderRadius ?? 12}px`);
 
-    // Sync with globalCourseStore so canvas elements update immediately
-    globalCourseStore.applyGlobalTheme(tokens, {
-      applyBackgroundToPages: cascadeToPages,
-      applyLogoToPages: true,
-    });
+    if (options?.cascadeToPages) {
+      globalCourseStore.applyGlobalTheme(tokens, {
+        applyBackgroundToPages: options.applyBackgroundToPages ?? true,
+        applyLogoToPages: options.applyLogoToPages ?? true,
+        applyTypographyToPages: options.applyTypographyToPages ?? true,
+        applySpacingToPages: options.applySpacingToPages ?? true,
+      });
+    }
   };
 
-  // Sync state changes to localStorage and DOM on mount or state update
+  // Sync state changes to localStorage and DOM CSS variables on mount or update
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_MODE, themeMode);
@@ -110,7 +177,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       // ignore
     }
 
-    applyDOMAndStore(themeMode, themeTokens, false);
+    applyDOMAndStore(themeMode, themeTokens, { cascadeToPages: false });
   }, [themeMode, themeTokens]);
 
   const setThemeMode = (mode: ThemeMode) => {
@@ -122,22 +189,43 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       nextTokens = LIGHT_THEME_DEFAULT;
     }
     setThemeTokensState(nextTokens);
-    applyDOMAndStore(mode, nextTokens, true);
+    applyDOMAndStore(mode, nextTokens, {
+      cascadeToPages: true,
+      applyBackgroundToPages: true,
+      applyLogoToPages: true,
+    });
   };
 
   const updateThemeTokens = (
     tokens: GlobalTheme,
-    options?: { applyBackgroundToPages?: boolean; applyLogoToPages?: boolean }
+    options?: {
+      applyBackgroundToPages?: boolean;
+      applyLogoToPages?: boolean;
+      applyTypographyToPages?: boolean;
+      applySpacingToPages?: boolean;
+    }
   ) => {
     setThemeModeState('custom');
     setThemeTokensState(tokens);
-    applyDOMAndStore('custom', tokens, options?.applyBackgroundToPages ?? true);
+    applyDOMAndStore('custom', tokens, {
+      cascadeToPages: true,
+      applyBackgroundToPages: options?.applyBackgroundToPages ?? true,
+      applyLogoToPages: options?.applyLogoToPages ?? false,
+      applyTypographyToPages: options?.applyTypographyToPages ?? true,
+      applySpacingToPages: options?.applySpacingToPages ?? true,
+    });
   };
 
   const resetTheme = () => {
     setThemeModeState('dark');
     setThemeTokensState(DARK_THEME_DEFAULT);
-    applyDOMAndStore('dark', DARK_THEME_DEFAULT, true);
+    applyDOMAndStore('dark', DARK_THEME_DEFAULT, {
+      cascadeToPages: true,
+      applyBackgroundToPages: true,
+      applyLogoToPages: true,
+      applyTypographyToPages: true,
+      applySpacingToPages: true,
+    });
   };
 
   return (

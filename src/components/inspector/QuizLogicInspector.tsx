@@ -195,6 +195,50 @@ export const QuizLogicInspector: React.FC<Props> = ({ node, onUpdate }) => {
           </select>
         </div>
       </div>
+
+      {/* Dynamic Variable Score Binding */}
+      <div className="space-y-3 pt-3 border-t border-slate-800/80">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span className="font-bold text-slate-300 text-[11px] uppercase tracking-wider">
+            Bind Score to State Variable
+          </span>
+        </div>
+
+        <div>
+          <label className="block text-slate-400 mb-1">Target Course Variable:</label>
+          <select
+            value={quizLogic.targetVariableId || ''}
+            onChange={(e) => handleUpdateLogic({ targetVariableId: e.target.value || undefined })}
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-slate-200 outline-none focus:border-amber-500 font-mono text-xs"
+          >
+            <option value="">(None - Standalone Quiz Score)</option>
+            {(course.variables || []).map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name} ({v.type})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {quizLogic.targetVariableId && (
+          <div>
+            <label className="block text-slate-400 mb-1">Score Update Mode:</label>
+            <select
+              value={quizLogic.updateVariableMode || 'add'}
+              onChange={(e) =>
+                handleUpdateLogic({
+                  updateVariableMode: e.target.value as 'add' | 'set',
+                })
+              }
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-slate-200 outline-none focus:border-amber-500 text-xs"
+            >
+              <option value="add">Add Quiz Points (+{node.points} pts) to Variable</option>
+              <option value="set">Set Variable Value Directly to Total Points</option>
+            </select>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

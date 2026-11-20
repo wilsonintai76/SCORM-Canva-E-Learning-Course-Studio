@@ -16,6 +16,7 @@ import {
 export const AccessibilityModal: React.FC = () => {
   const {
     course,
+    activePageIndex,
     isAccessibilityModalOpen,
     setIsAccessibilityModalOpen,
     setActivePage,
@@ -23,9 +24,23 @@ export const AccessibilityModal: React.FC = () => {
     updateNode,
   } = useCourseStore();
 
-  const audit = useMemo(() => auditCourseAccessibility(course), [course]);
+  const [scope, setScope] = React.useState<'current_slide' | 'full_course'>('current_slide');
+  const [activeTab, setActiveTab] = React.useState<'all' | 'contrast' | 'readability' | 'alignment'>('all');
+
+  const audit = useMemo(() => {
+    return auditCourseAccessibility(
+      course,
+      scope === 'current_slide' ? activePageIndex : undefined
+    );
+  }, [course, scope, activePageIndex]);
 
   if (!isAccessibilityModalOpen) return null;
+
+  // Filter issues by active tab
+  const filteredIssues = audit.issues.filter((issue) => {
+    if (activeTab === 'all') return true;
+    return issue.category === activeTab;
+  });
 
   // Jump to element on slide
   const handleJumpToIssue = (issue: AccessibilityIssue) => {
@@ -46,7 +61,22 @@ export const AccessibilityModal: React.FC = () => {
       updateNode(issue.nodeId, { color: issue.suggestedFix as string });
     } else if (issue.autoFixType === 'increase_font_size') {
       updateNode(issue.nodeId, { fontSize: issue.suggestedFix as number });
+    } else if (issue.autoFixType === 'fix_alignment' && typeof issue.suggestedFix === 'object') {
+      const pos = issue.suggestedFix as { x?: number; y?: number };
+      updateNode(issue.nodeId, {
+        ...(pos.x !== undefined ? { x: pos.x } : {}),
+        ...(pos.y !== undefined ? { y: pos.y } : {}),
+      });
     }
+  };
+
+  // Batch Auto-Fix All Issues on current slide
+  const handleAutoFixAll = () => {
+    audit.issues.forEach((issue) => {
+      if (issue.autoFixType) {
+        handleAutoFix(issue);
+      }
+    });
   };
 
   const getScoreColor = (score: number) => {
@@ -66,13 +96,13 @@ export const AccessibilityModal: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                WCAG 2.1 Accessibility Auditor
+                Automated Design Accessibility & Alignment Checker
                 <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-blue-950 border border-blue-800 text-blue-400">
                   Level {audit.wcagLevel}
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Automated accessibility compliance scan for images, contrast ratios, and text sizing
+                Scans slide for color contrast, font readability, image alt text, and alignment consistency
               </p>
             </div>
           </div>
@@ -86,6 +116,42 @@ export const AccessibilityModal: React.FC = () => {
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Audit Scope Switcher & Action Controls */}
+          <div className="flex items-center justify-between bg-slate-950/80 p-1.5 rounded-xl border border-slate-800 text-xs">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setScope('current_slide')}
+                className={`px-3 py-1 rounded-lg font-semibold transition-colors ${
+                  scope === 'current_slide'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Current Slide (Slide {activePageIndex + 1})
+              </button>
+              <button
+                onClick={() => setScope('full_course')}
+                className={`px-3 py-1 rounded-lg font-semibold transition-colors ${
+                  scope === 'full_course'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Full Course ({course.pages.length} Slides)
+              </button>
+            </div>
+
+            {audit.issues.some((i) => Boolean(i.autoFixType)) && (
+              <button
+                onClick={handleAutoFixAll}
+                className="px-3 py-1 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded-lg font-semibold flex items-center gap-1.5 transition-colors shadow-xs"
+              >
+                <Wand2 className="w-3.5 h-3.5" />
+                <span>Auto-Fix All Slide Issues</span>
+              </button>
+            )}
+          </div>
+
           {/* Top Score Banner */}
           <div className="grid grid-cols-4 gap-3">
             <div
@@ -95,7 +161,7 @@ export const AccessibilityModal: React.FC = () => {
             >
               <span className="text-2xl font-black">{audit.score}%</span>
               <span className="text-[10px] uppercase font-bold tracking-wider mt-0.5">
-                Accessibility Score
+                Audit Score
               </span>
             </div>
 
@@ -115,26 +181,46 @@ export const AccessibilityModal: React.FC = () => {
             </div>
           </div>
 
+          {/* Diagnostic Category Tabs */}
+          <div className="flex items-center gap-1 border-b border-slate-800 pb-2 text-xs">
+            {[
+              { id: 'all', label: 'All Findings', count: audit.issues.length },
+              { id: 'contrast', label: 'Color Contrast', count: audit.issues.filter((i) => i.category === 'contrast').length },
+              { id: 'readability', label: 'Font Readability', count: audit.issues.filter((i) => i.category === 'readability').length },
+              { id: 'alignment', label: 'Alignment Consistency', count: audit.issues.filter((i) => i.category === 'alignment').length },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-slate-800 text-white border border-slate-700'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>{tab.label}</span>
+                {tab.count > 0 && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-950 text-blue-400 border border-slate-800">
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
           {/* Issues List */}
           <div>
-            <div className="flex items-center justify-between mb-2.5">
-              <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                Detected Compliance Findings ({audit.issues.length})
-              </h4>
-            </div>
-
-            {audit.issues.length === 0 ? (
+            {filteredIssues.length === 0 ? (
               <div className="p-6 rounded-xl border border-emerald-500/40 bg-emerald-950/20 text-center space-y-2">
                 <ShieldCheck className="w-8 h-8 text-emerald-400 mx-auto" />
-                <h5 className="text-sm font-bold text-white">Outstanding Accessibility!</h5>
+                <h5 className="text-sm font-bold text-white">No Issues Found in this Category!</h5>
                 <p className="text-xs text-slate-300 max-w-md mx-auto">
-                  All images have descriptive alt text, all typography adheres to WCAG 2.1 AA color
-                  contrast requirements, and text sizing is legible.
+                  All typography, contrast ratios, and element alignment pass automated design checks.
                 </p>
               </div>
             ) : (
               <div className="space-y-2.5">
-                {audit.issues.map((issue) => (
+                {filteredIssues.map((issue) => (
                   <div
                     key={issue.id}
                     className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 hover:border-slate-700 transition-colors space-y-2"

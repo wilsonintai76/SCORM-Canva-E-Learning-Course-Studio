@@ -1,13 +1,22 @@
 import React, { useState } from 'react';
-import { TextNode } from '../../../types/schema';
+import { CourseVariable, TextNode } from '../../../types/schema';
+import { interpolateVariables } from '../../../utils/variableInterpolator';
 
 interface Props {
   node: TextNode;
   isSelected: boolean;
+  variables?: CourseVariable[];
+  showVariablePreview?: boolean;
   onUpdateContent: (content: string) => void;
 }
 
-export const TextNodeRenderer: React.FC<Props> = ({ node, isSelected, onUpdateContent }) => {
+export const TextNodeRenderer: React.FC<Props> = ({
+  node,
+  isSelected,
+  variables = [],
+  showVariablePreview = true,
+  onUpdateContent,
+}) => {
   const [isEditing, setIsEditing] = useState(false);
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -30,6 +39,12 @@ export const TextNodeRenderer: React.FC<Props> = ({ node, isSelected, onUpdateCo
       ? 'font-semibold'
       : 'font-normal';
 
+  const hasVariables = Boolean(node.content && node.content.includes('{{'));
+  const displayedText =
+    hasVariables && showVariablePreview
+      ? interpolateVariables(node.content, variables)
+      : node.content;
+
   return (
     <div
       className={`w-full h-full relative select-none cursor-move transition-shadow ${fontWeightClass}`}
@@ -37,15 +52,25 @@ export const TextNodeRenderer: React.FC<Props> = ({ node, isSelected, onUpdateCo
       style={{
         color: node.color || '#0f172a',
         fontSize: `${node.fontSize || 16}px`,
+        fontFamily: node.fontFamily || undefined,
         textAlign: node.textAlign || 'left',
         backgroundColor: node.backgroundColor || 'transparent',
         borderRadius: node.borderRadius ? `${node.borderRadius}px` : undefined,
         padding: node.padding ? `${node.padding}px` : '4px',
-        lineHeight: 1.3,
+        lineHeight: node.lineHeight || 1.3,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
       }}
     >
+      {hasVariables && !isEditing && isSelected && (
+        <span
+          className="absolute -top-5 right-0 px-1.5 py-0.5 rounded bg-sky-950/95 border border-sky-500/60 text-[9px] font-mono text-sky-300 pointer-events-none z-20"
+          title="Contains dynamic variables (double-click to edit raw template)"
+        >
+          {'{{var}}'} {showVariablePreview ? 'Live' : 'Raw'}
+        </span>
+      )}
+
       {isEditing ? (
         <textarea
           autoFocus
@@ -57,10 +82,11 @@ export const TextNodeRenderer: React.FC<Props> = ({ node, isSelected, onUpdateCo
               setIsEditing(false);
             }
           }}
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <div>{node.content || 'Click twice to edit text'}</div>
+        <div>{displayedText || 'Click twice to edit text'}</div>
       )}
     </div>
   );

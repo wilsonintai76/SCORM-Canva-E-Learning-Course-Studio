@@ -40,7 +40,7 @@ export const CalloutNodeRenderer: React.FC<Props> = ({ node }) => {
 
   return (
     <div
-      className={`w-full h-full p-4 rounded-xl border-l-4 border shadow-xs flex flex-col cursor-move overflow-hidden ${style.bg}`}
+      className={`w-full h-full p-4 rounded-xl border-l-4 border shadow-xs flex flex-col cursor-move select-none overflow-hidden ${style.bg}`}
     >
       <div className="flex items-center gap-2 mb-1.5">
         {style.icon}

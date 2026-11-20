@@ -12,6 +12,8 @@ import { QuizLogicInspector } from './QuizLogicInspector';
 import { SlideTransitionsInspector } from './SlideTransitionsInspector';
 import { AudioNarrationInspector } from './AudioNarrationInspector';
 import { LayersPanel } from './LayersPanel';
+import { AnimationInspector } from './AnimationInspector';
+import { DesignTokensPanel } from './DesignTokensPanel';
 import {
   Layers,
   Sliders,
@@ -42,6 +44,9 @@ import {
   HelpCircle,
   Activity,
   Volume2,
+  FolderHeart,
+  BookmarkPlus,
+  Zap,
 } from 'lucide-react';
 
 export const InspectorPanel: React.FC = () => {
@@ -53,6 +58,9 @@ export const InspectorPanel: React.FC = () => {
     selectedNode,
     groupNodes,
     ungroupNodes,
+    transformGroup,
+    scaleGroup,
+    saveSelectionToMyAssets,
     toggleLockNode,
     updateNode,
     deleteNode,
@@ -66,101 +74,149 @@ export const InspectorPanel: React.FC = () => {
     updateActivePage,
     updateManifest,
     setIsAiPaletteOpen,
+    activeInspectorTab: activeTab,
+    setActiveInspectorTab: setActiveTab,
   } = useCourseStore();
 
-  const [activeTab, setActiveTab] = useState<'element' | 'layers' | 'quiz_logic' | 'slide' | 'variables' | 'course'>('element');
+  const [isQuickSaveOpen, setIsQuickSaveOpen] = useState(false);
+  const [quickSaveName, setQuickSaveName] = useState('');
+  const [quickSaveSavedMsg, setQuickSaveSavedMsg] = useState<string | null>(null);
 
   // Auto-switch to element tab whenever a new node is selected
   React.useEffect(() => {
     if (selectedNodeId) {
-      setActiveTab((prev) => (prev === 'layers' ? 'layers' : 'element'));
+      if (activeTab !== 'layers' && activeTab !== 'animations') {
+        setActiveTab('element');
+      }
     }
   }, [selectedNodeId]);
 
   return (
     <aside className="w-80 bg-slate-900 border-l border-slate-800 flex flex-col h-full shrink-0 select-none">
       {/* Top Header / Mode Switcher */}
-      <div className="flex border-b border-slate-800 bg-slate-950/60 p-1 gap-0.5">
+      <div className="flex flex-wrap border-b border-slate-800 bg-slate-950/60 p-1 gap-1">
         <button
           onClick={() => setActiveTab('element')}
           title="Element properties and styling"
-          className={`flex-1 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
-            activeTab === 'element' || (selectedNode && activeTab !== 'course' && activeTab !== 'variables' && activeTab !== 'quiz_logic' && activeTab !== 'layers' && activeTab !== 'slide')
+          className={`flex-1 min-w-[66px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+            activeTab === 'element' ||
+            (selectedNode &&
+              activeTab !== 'course' &&
+              activeTab !== 'variables' &&
+              activeTab !== 'tokens' &&
+              activeTab !== 'quiz_logic' &&
+              activeTab !== 'layers' &&
+              activeTab !== 'slide' &&
+              activeTab !== 'animations')
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Sliders className="w-3.5 h-3.5" />
+          <Sliders className="w-3 h-3" />
           <span>Element</span>
         </button>
 
         <button
           onClick={() => setActiveTab('layers')}
           title="Slide layer stack list view, reordering, grouping, locking, and hiding"
-          className={`flex-1 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
+          className={`flex-1 min-w-[62px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'layers'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Layers className="w-3.5 h-3.5 text-blue-400" />
+          <Layers className="w-3 h-3 text-blue-400" />
           <span>Layers</span>
         </button>
+
+        {selectedNode && (
+          <button
+            onClick={() => setActiveTab('animations')}
+            title="Timeline animation configuration for selected element"
+            className={`flex-1 min-w-[58px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+              activeTab === 'animations'
+                ? 'bg-amber-600 text-white font-semibold'
+                : 'text-amber-400 hover:text-amber-200'
+            }`}
+          >
+            <Zap className="w-3 h-3" />
+            <span>Anim</span>
+          </button>
+        )}
 
         {selectedNode?.type === 'quiz' && (
           <button
             onClick={() => setActiveTab('quiz_logic')}
             title="Quiz logic, answers, feedback messages and result screen routing"
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
+            className={`flex-1 min-w-[68px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
               activeTab === 'quiz_logic'
                 ? 'bg-emerald-600 text-white font-semibold'
                 : 'text-emerald-400 hover:text-emerald-200'
             }`}
           >
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>Quiz Logic</span>
+            <HelpCircle className="w-3 h-3" />
+            <span>Logic</span>
           </button>
         )}
 
         <button
           onClick={() => setActiveTab('slide')}
           title="Slide background and settings"
-          className={`flex-1 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
-            activeTab === 'slide' && !selectedNode
+          className={`flex-1 min-w-[56px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+            activeTab === 'slide' || (!selectedNode && activeTab === 'element')
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <FileText className="w-3.5 h-3.5" />
+          <FileText className="w-3 h-3" />
           <span>Slide</span>
         </button>
         <button
           onClick={() => setActiveTab('variables')}
           title="Dynamic course variables management"
-          className={`flex-1 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
+          className={`flex-1 min-w-[56px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'variables'
               ? 'bg-slate-800 text-white font-semibold'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Code2 className="w-3.5 h-3.5 text-blue-400" />
+          <Code2 className="w-3 h-3 text-blue-400" />
           <span>Vars</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('tokens')}
+          title="Global Design Tokens (Colors, Typography & Spacing)"
+          className={`flex-1 min-w-[64px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+            activeTab === 'tokens'
+              ? 'bg-pink-600/90 text-white font-semibold'
+              : 'text-pink-400 hover:text-pink-200'
+          }`}
+        >
+          <Palette className="w-3 h-3" />
+          <span>Tokens</span>
         </button>
         <button
           onClick={() => setActiveTab('course')}
           title="SCORM 1.2 manifest and LMS configuration"
-          className={`flex-1 py-1.5 text-xs font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
+          className={`flex-1 min-w-[62px] py-1.5 px-1.5 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors cursor-pointer ${
             activeTab === 'course' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Settings2 className="w-3.5 h-3.5" />
+          <Settings2 className="w-3 h-3" />
           <span>SCORM</span>
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* ELEMENT TAB */}
-        {selectedNode && activeTab !== 'course' && activeTab !== 'variables' && activeTab !== 'quiz_logic' && activeTab !== 'slide' && (
+        {selectedNode &&
+          activeTab !== 'course' &&
+          activeTab !== 'variables' &&
+          activeTab !== 'tokens' &&
+          activeTab !== 'quiz_logic' &&
+          activeTab !== 'layers' &&
+          activeTab !== 'animations' &&
+          activeTab !== 'slide' && (
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div>
@@ -321,6 +377,73 @@ export const InspectorPanel: React.FC = () => {
                 </div>
               </div>
 
+              {/* Layer Order Control */}
+              {(() => {
+                const pageNodes = currentPage?.nodes || [];
+                const sortedByPaint = [...pageNodes].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1));
+                const stackIndex = sortedByPaint.findIndex((n) => n.id === selectedNode.id);
+                const totalLayers = sortedByPaint.length;
+                const displayRank = stackIndex >= 0 ? stackIndex + 1 : 1;
+                const currentZ = selectedNode.zIndex ?? 1;
+
+                return (
+                  <div className="mb-4 pt-3 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Layer Order
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-950 border border-slate-800 px-1.5 py-0.5 rounded">
+                          {displayRank}/{Math.max(1, totalLayers)} · z:{currentZ}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => bringToFront(selectedNode.id)}
+                        title="Bring to Front (Topmost Layer)"
+                        className="py-1.5 px-1 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <ChevronsUp className="w-4 h-4 text-blue-400" />
+                        <span className="text-[9px] mt-0.5 font-medium whitespace-nowrap">To Front</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveUp(selectedNode.id)}
+                        title="Bring Forward 1 Layer"
+                        className="py-1.5 px-1 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                        <span className="text-[9px] mt-0.5 font-medium whitespace-nowrap">Forward</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveDown(selectedNode.id)}
+                        title="Send Backward 1 Layer"
+                        className="py-1.5 px-1 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                        <span className="text-[9px] mt-0.5 font-medium whitespace-nowrap">Backward</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => sendToBack(selectedNode.id)}
+                        title="Send to Back (Bottommost Layer)"
+                        className="py-1.5 px-1 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <ChevronsDown className="w-4 h-4 text-blue-400" />
+                        <span className="text-[9px] mt-0.5 font-medium whitespace-nowrap">To Back</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Object Grouping Button Group */}
               <div className="mb-4 pt-3 border-t border-slate-800/80">
                 <div className="flex items-center justify-between mb-2">
@@ -362,6 +485,105 @@ export const InspectorPanel: React.FC = () => {
                     <Boxes className="w-3.5 h-3.5 text-amber-400" />
                     <span>Ungroup</span>
                   </button>
+                </div>
+
+                {/* Parent Entity Scale Controls (When Grouped or Multi-Selected) */}
+                {(Boolean(selectedNode.groupId) || selectedNodeIds.length > 1) && (
+                  <div className="mt-2.5 p-2 rounded-lg bg-slate-950/70 border border-slate-800/90 space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
+                      <span>Proportional Scale Unit</span>
+                      <span className="font-mono text-sky-400">Transform All</span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1 text-[10px] font-mono">
+                      {[0.5, 0.75, 1.25, 1.5, 2.0].map((mult) => (
+                        <button
+                          key={mult}
+                          onClick={() => {
+                            const ids = selectedNode.groupId
+                              ? currentPage?.nodes.filter((n) => n.groupId === selectedNode.groupId).map((n) => n.id) || selectedNodeIds
+                              : selectedNodeIds;
+                            scaleGroup(ids, mult);
+                          }}
+                          className="py-1 rounded bg-slate-900 hover:bg-sky-600/30 text-slate-300 hover:text-sky-300 border border-slate-800 hover:border-sky-500/50 transition-colors cursor-pointer"
+                          title={`Scale entire group to ${Math.round(mult * 100)}%`}
+                        >
+                          {Math.round(mult * 100)}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Save Selection to Resource Library Button / Inline Form */}
+                <div className="mt-2.5 space-y-1.5">
+                  {quickSaveSavedMsg && (
+                    <div className="p-1.5 rounded bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-[10px] text-center font-medium">
+                      {quickSaveSavedMsg}
+                    </div>
+                  )}
+                  {isQuickSaveOpen ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!quickSaveName.trim()) return;
+                        const isGroup = Boolean(selectedNode.groupId) || selectedNodeIds.length > 1;
+                        saveSelectionToMyAssets(
+                          quickSaveName.trim(),
+                          isGroup ? 'patterns' : undefined,
+                          selectedNodeIds.length > 0 ? selectedNodeIds : [selectedNode.id]
+                        );
+                        setIsQuickSaveOpen(false);
+                        setQuickSaveSavedMsg(`Saved "${quickSaveName.trim()}" to Resource Library`);
+                        setTimeout(() => setQuickSaveSavedMsg(null), 2600);
+                      }}
+                      className="p-2 rounded-lg bg-slate-950 border border-sky-500/40 space-y-1.5"
+                    >
+                      <input
+                        type="text"
+                        value={quickSaveName}
+                        onChange={(e) => setQuickSaveName(e.target.value)}
+                        placeholder="Resource name..."
+                        autoFocus
+                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white outline-none focus:border-sky-500"
+                      />
+                      <div className="flex gap-1">
+                        <button
+                          type="submit"
+                          disabled={!quickSaveName.trim()}
+                          className="flex-1 py-1 rounded bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-[10px] font-semibold cursor-pointer"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsQuickSaveOpen(false)}
+                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const isGroup = Boolean(selectedNode.groupId) || selectedNodeIds.length > 1;
+                        const defaultName = isGroup
+                          ? 'Custom Pattern Group'
+                          : selectedNode.type === 'text'
+                          ? (selectedNode as any).content?.slice(0, 24) || 'Custom Text Block'
+                          : selectedNode.type === 'shape'
+                          ? `Custom ${(selectedNode as any).shapeType || 'Shape'}`
+                          : 'Custom Resource';
+                        setQuickSaveName(defaultName);
+                        setIsQuickSaveOpen(true);
+                      }}
+                      title="Save this element or group to Resource Library for drag-and-drop reuse across pages"
+                      className="w-full py-1.5 px-2.5 rounded-lg bg-sky-950/60 border border-sky-500/40 text-[11px] font-semibold text-sky-300 hover:bg-sky-600 hover:text-white flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                    >
+                      <FolderHeart className="w-3.5 h-3.5" />
+                      <span>Save to Resource Library</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -462,56 +684,6 @@ export const InspectorPanel: React.FC = () => {
                 </div>
               </div>
 
-              {/* Layer Control Toolbar */}
-              <div className="mb-4 pt-3 border-t border-slate-800/80">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                      Layer Order
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono text-slate-500">
-                    z-index: {selectedNode.zIndex || 1}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                  <button
-                    onClick={() => bringToFront(selectedNode.id)}
-                    title="Bring to Front (Highest Z-Index)"
-                    className="py-1.5 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                  >
-                    <ChevronsUp className="w-4 h-4 text-blue-400" />
-                    <span className="text-[9px] mt-0.5 font-medium">Front</span>
-                  </button>
-                  <button
-                    onClick={() => moveUp(selectedNode.id)}
-                    title="Move Up 1 Layer"
-                    className="py-1.5 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                  >
-                    <ChevronUp className="w-4 h-4" />
-                    <span className="text-[9px] mt-0.5 font-medium">Up</span>
-                  </button>
-                  <button
-                    onClick={() => moveDown(selectedNode.id)}
-                    title="Move Down 1 Layer"
-                    className="py-1.5 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                    <span className="text-[9px] mt-0.5 font-medium">Down</span>
-                  </button>
-                  <button
-                    onClick={() => sendToBack(selectedNode.id)}
-                    title="Send to Back (Lowest Z-Index)"
-                    className="py-1.5 flex flex-col items-center justify-center rounded text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                  >
-                    <ChevronsDown className="w-4 h-4 text-blue-400" />
-                    <span className="text-[9px] mt-0.5 font-medium">Back</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Type Specific Inspectors */}
               {selectedNode.type === 'text' && (
                 <TextInspector
@@ -594,6 +766,9 @@ export const InspectorPanel: React.FC = () => {
         {(!selectedNode || activeTab === 'slide') &&
           activeTab !== 'course' &&
           activeTab !== 'variables' &&
+          activeTab !== 'tokens' &&
+          activeTab !== 'layers' &&
+          activeTab !== 'animations' &&
           activeTab !== 'quiz_logic' &&
           currentPage && (
           <div className="space-y-4 text-xs">
@@ -709,8 +884,19 @@ export const InspectorPanel: React.FC = () => {
           </div>
         )}
 
+        {/* ANIMATIONS TAB */}
+        {activeTab === 'animations' && selectedNode && (
+          <AnimationInspector
+            node={selectedNode}
+            onUpdate={(updates) => updateNode(selectedNode.id, updates)}
+          />
+        )}
+
         {/* VARIABLES TAB */}
         {activeTab === 'variables' && <VariableManager />}
+
+        {/* DESIGN TOKENS TAB */}
+        {activeTab === 'tokens' && <DesignTokensPanel />}
 
         {/* SCORM / COURSE TAB */}
         {activeTab === 'course' && (

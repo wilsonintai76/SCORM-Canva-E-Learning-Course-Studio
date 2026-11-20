@@ -11,13 +11,14 @@ export interface AccessibilityIssue {
   pageIndex: number;
   nodeId?: string;
   nodeType?: string;
+  category?: 'contrast' | 'readability' | 'alignment' | 'structure';
   severity: 'critical' | 'warning' | 'info';
   title: string;
   description: string;
   recommendation: string;
-  wcagCriterion: string; // e.g. "1.1.1 Non-text Content (Level A)"
-  autoFixType?: 'add_alt' | 'fix_contrast' | 'increase_font_size';
-  suggestedFix?: string | number;
+  wcagCriterion: string; // e.g. "1.4.3 Contrast (Minimum) (Level AA)"
+  autoFixType?: 'add_alt' | 'fix_contrast' | 'increase_font_size' | 'fix_alignment' | 'standardize_font';
+  suggestedFix?: string | number | { x?: number; y?: number };
 }
 
 export interface AccessibilityAuditResult {
@@ -69,13 +70,22 @@ export function getSlideBackgroundColor(bg: { type: string; value: string }): st
   return '#0f172a'; // default dark slate
 }
 
-// Run audit on full course
-export function auditCourseAccessibility(course: CourseManifest): AccessibilityAuditResult {
+// Run audit on full course or specific page
+export function auditCourseAccessibility(
+  course: CourseManifest,
+  targetPageIndex?: number
+): AccessibilityAuditResult {
   const issues: AccessibilityIssue[] = [];
   const passedChecks: string[] = [];
   let totalChecks = 0;
 
-  course.pages.forEach((page, pageIndex) => {
+  const pagesToAudit =
+    targetPageIndex !== undefined && targetPageIndex >= 0 && targetPageIndex < course.pages.length
+      ? [course.pages[targetPageIndex]]
+      : course.pages;
+
+  pagesToAudit.forEach((page) => {
+    const pageIndex = course.pages.indexOf(page);
     const pageBgColor = getSlideBackgroundColor(page.background);
 
     // 1. Check slide has title
@@ -86,6 +96,7 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
         pageId: page.id,
         pageTitle: `Slide ${pageIndex + 1}`,
         pageIndex,
+        category: 'structure',
         severity: 'warning',
         title: 'Missing Slide Title',
         description: 'Each slide should have a descriptive title for screen reader navigation.',
@@ -94,8 +105,75 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
       });
     }
 
-    // 2. Audit each canvas node
+    // Check font family consistency on slide
+    const textNodes = page.nodes.filter((n) => n.type === 'text') as TextNode[];
+    const fontFamilies = new Set(textNodes.map((t) => t.fontFamily || 'Inter, sans-serif'));
+    if (fontFamilies.size > 2) {
+      totalChecks++;
+      issues.push({
+        id: `issue_font_inconsistency_${page.id}`,
+        pageId: page.id,
+        pageTitle: page.title || `Slide ${pageIndex + 1}`,
+        pageIndex,
+        category: 'readability',
+        severity: 'warning',
+        title: 'Font Family Inconsistency',
+        description: `This slide uses ${fontFamilies.size} different font families, which increases cognitive load.`,
+        recommendation: 'Use a maximum of 2 complementary font families per slide (e.g., heading + body).',
+        wcagCriterion: '1.4.8 Visual Presentation (Level AAA)',
+      });
+    }
+
+    // Check alignment consistency across elements on the slide
+    const canvasW = course.canvasWidth || 960;
+    const canvasH = course.canvasHeight || 540;
+
     page.nodes.forEach((node) => {
+      // Bounds Overflow check
+      totalChecks++;
+      if (node.x < 0 || node.y < 0 || node.x + node.width > canvasW + 10 || node.y + node.height > canvasH + 10) {
+        issues.push({
+          id: `issue_overflow_${node.id}`,
+          pageId: page.id,
+          pageTitle: page.title || `Slide ${pageIndex + 1}`,
+          pageIndex,
+          nodeId: node.id,
+          nodeType: node.type,
+          category: 'alignment',
+          severity: 'warning',
+          title: 'Canvas Bounds Overflow',
+          description: `Element extends outside the visible slide stage bounds (${canvasW}x${canvasH}px).`,
+          recommendation: 'Reposition element so it rests completely within page margins.',
+          wcagCriterion: '1.4.10 Reflow (Level AA)',
+          autoFixType: 'fix_alignment',
+          suggestedFix: {
+            x: Math.max(40, Math.min(canvasW - node.width - 40, node.x)),
+            y: Math.max(40, Math.min(canvasH - node.height - 40, node.y)),
+          },
+        });
+      }
+
+      // Check near-misaligned X position to standard left margin (40px or 60px)
+      totalChecks++;
+      if (node.x > 30 && node.x < 40 && node.x !== 40) {
+        issues.push({
+          id: `issue_margin_align_${node.id}`,
+          pageId: page.id,
+          pageTitle: page.title || `Slide ${pageIndex + 1}`,
+          pageIndex,
+          nodeId: node.id,
+          nodeType: node.type,
+          category: 'alignment',
+          severity: 'info',
+          title: 'Slight Left Margin Misalignment',
+          description: `Element X position is ${node.x}px (slightly off standard 40px left margin).`,
+          recommendation: 'Snap element left edge to 40px margin for consistent visual alignment.',
+          wcagCriterion: '1.4.10 Alignment Consistency (Level AA)',
+          autoFixType: 'fix_alignment',
+          suggestedFix: { x: 40, y: node.y },
+        });
+      }
+
       // IMAGE CHECKS
       if (node.type === 'image') {
         const img = node as ImageNode;
@@ -108,6 +186,7 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
             pageIndex,
             nodeId: img.id,
             nodeType: 'image',
+            category: 'structure',
             severity: 'critical',
             title: 'Missing Image Alt Text',
             description: 'Image has no alternative text description, making it inaccessible to screen readers.',
@@ -124,6 +203,7 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
             pageIndex,
             nodeId: img.id,
             nodeType: 'image',
+            category: 'structure',
             severity: 'warning',
             title: 'Generic Image Alt Text',
             description: `Alt text "${img.alt}" is too vague for visually impaired learners.`,
@@ -147,8 +227,9 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
             pageIndex,
             nodeId: text.id,
             nodeType: 'text',
+            category: 'readability',
             severity: 'warning',
-            title: 'Small Font Size',
+            title: 'Small Font Size (<12px)',
             description: `Font size is ${text.fontSize}px, which may be difficult for learners with visual impairments to read.`,
             recommendation: 'Increase font size to at least 14px or 16px.',
             wcagCriterion: '1.4.4 Resize Text (Level AA)',
@@ -177,6 +258,7 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
             pageIndex,
             nodeId: text.id,
             nodeType: 'text',
+            category: 'contrast',
             severity: 'critical',
             title: 'Low Text Color Contrast',
             description: `Contrast ratio is ${ratio.toFixed(2)}:1, failing the WCAG ${minRatio}:1 minimum requirement.`,
@@ -200,6 +282,7 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
             pageIndex,
             nodeId: quiz.id,
             nodeType: 'quiz',
+            category: 'structure',
             severity: 'warning',
             title: 'Incomplete Quiz Options',
             description: 'Quiz question should offer at least two distinct answer choices for assessment.',
@@ -215,16 +298,19 @@ export function auditCourseAccessibility(course: CourseManifest): AccessibilityA
     passedChecks.push('All images include informative alternative text');
     passedChecks.push('All text elements pass WCAG 2.1 AA color contrast');
     passedChecks.push('All typography adheres to minimum readability thresholds (12px+)');
-    passedChecks.push('All slides contain clear headings and titles');
+    passedChecks.push('All slide elements are aligned within canvas margins');
   } else {
     if (!issues.some((i) => i.nodeType === 'image')) {
       passedChecks.push('All image assets have accessible alt text');
     }
-    if (!issues.some((i) => i.title.includes('Contrast'))) {
+    if (!issues.some((i) => i.category === 'contrast')) {
       passedChecks.push('All text elements pass WCAG AA contrast');
     }
-    if (!issues.some((i) => i.title.includes('Font Size'))) {
+    if (!issues.some((i) => i.category === 'readability')) {
       passedChecks.push('All typography meets minimum legible sizing');
+    }
+    if (!issues.some((i) => i.category === 'alignment')) {
+      passedChecks.push('All canvas elements follow standard alignment rules');
     }
   }
 

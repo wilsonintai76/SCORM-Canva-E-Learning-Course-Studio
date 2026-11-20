@@ -22,7 +22,8 @@ export const ImageNodeRenderer: React.FC<Props> = ({ node }) => {
         <img
           src={node.url}
           alt={node.alt || 'Course Asset'}
-          className="w-full h-full pointer-events-none"
+          draggable={false}
+          className="w-full h-full pointer-events-none select-none"
           style={{ objectFit: node.objectFit || 'cover' }}
           loading="lazy"
           onError={(e) => {

@@ -21,6 +21,7 @@ import { GridSettingsModal } from './components/modals/GridSettingsModal';
 import { MediaManagerModal } from './components/modals/MediaManagerModal';
 import { BranchingFlowModal } from './components/modals/BranchingFlowModal';
 import { PdfHandoutModal } from './components/modals/PdfHandoutModal';
+import { GlobalCommandBar } from './components/navigation/GlobalCommandBar';
 
 export default function App() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
       <PageTabs />
 
       {/* Global Modals & Drawers */}
+      <GlobalCommandBar />
       <ScormPlayerModal />
       <LmsDebuggerDrawer />
       <AiPalette />
