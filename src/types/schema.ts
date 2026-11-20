@@ -167,6 +167,15 @@ export interface CanvasGuide {
   isLocked?: boolean;
 }
 
+export interface GroupedObject {
+  id: string;
+  name: string;
+  nodeIds: string[];
+  isLocked?: boolean;
+  isCollapsed?: boolean;
+  createdAt?: string;
+}
+
 export interface Page {
   id: string;
   title: string;
@@ -177,6 +186,7 @@ export interface Page {
     value: string;
   };
   nodes: CanvasNode[];
+  groups?: GroupedObject[];
   guides?: CanvasGuide[];
   transition?: PageTransition;
   audioNarration?: AudioNarration;

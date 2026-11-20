@@ -3,7 +3,13 @@ import { useCourseStore, globalCourseStore } from '../../store/courseStore';
 import { CanvasNode, NodeType, TextNode, AssetItem, CanvasGuide } from '../../types/schema';
 import { TypographyPreset } from '../../data/typographyData';
 import { ComponentTemplateItem } from '../../data/componentTemplatesData';
-import { calculateSnapping, snapValueToGrid, SnapGuide, NodeBounds } from '../../utils/snappingEngine';
+import {
+  calculateSnapping,
+  snapValueToGrid,
+  computeCompositeBounds,
+  SnapGuide,
+  NodeBounds,
+} from '../../utils/snappingEngine';
 import { validateQuizConfig } from '../../utils/quizValidator';
 import { CanvasContextMenu } from './CanvasContextMenu';
 import { TextNodeRenderer } from './renderers/TextNodeRenderer';
@@ -64,6 +70,9 @@ import {
   MessageSquare,
   Check,
   ChevronLeft,
+  Magnet,
+  CornerUpLeft,
+  Focus,
 } from 'lucide-react';
 
 interface DragState {
@@ -94,7 +103,10 @@ export const CanvasAdapter: React.FC = () => {
     currentPage,
     selectedNodeId,
     selectedNodeIds,
+    deepSelectedNodeId,
+    deepSelectedGroupId,
     isSnapToGridEnabled,
+    isSmartGuidesEnabled,
     gridSize,
     gridColor,
     zoom,
@@ -103,6 +115,9 @@ export const CanvasAdapter: React.FC = () => {
     showGuides,
     setShowRulers,
     setShowGuides,
+    setSnapToGrid,
+    setSmartGuidesEnabled,
+    setIsGridSettingsModalOpen,
     addGuide,
     updateGuide,
     deleteGuide,
@@ -113,6 +128,8 @@ export const CanvasAdapter: React.FC = () => {
     setPan,
     resetView,
     setSelectedNodeId,
+    deepSelectNode,
+    exitDeepSelect,
     setSelectedNodeIds,
     toggleNodeSelection,
     groupNodes,
@@ -273,6 +290,11 @@ export const CanvasAdapter: React.FC = () => {
       } else if ((e.metaKey || e.ctrlKey) && e.key === '0') {
         e.preventDefault();
         resetView();
+      } else if (e.key === 'Escape') {
+        if (deepSelectedNodeId) {
+          e.preventDefault();
+          exitDeepSelect();
+        }
       } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         if (selectedNodeIds.length > 0 && currentPage) {
           e.preventDefault();
@@ -309,6 +331,7 @@ export const CanvasAdapter: React.FC = () => {
   }, [
     selectedNodeId,
     selectedNodeIds,
+    deepSelectedNodeId,
     currentPage,
     isSnapToGridEnabled,
     gridSize,
@@ -316,6 +339,7 @@ export const CanvasAdapter: React.FC = () => {
     duplicateNode,
     groupNodes,
     ungroupNodes,
+    exitDeepSelect,
     undo,
     redo,
     updateNode,
@@ -487,7 +511,7 @@ export const CanvasAdapter: React.FC = () => {
     }
   };
 
-  // Node Pointer Down (start moving single node or multi-selection group)
+  // Node Pointer Down (start moving single node, deep-selected child, or GroupedObject)
   const handleNodePointerDown = (e: React.PointerEvent, node: CanvasNode) => {
     if (contextMenu) {
       setContextMenu(null);
@@ -501,7 +525,10 @@ export const CanvasAdapter: React.FC = () => {
     didDragMoveRef.current = false;
 
     let activeSelectedIds = selectedNodeIds;
-    if (e.shiftKey) {
+    if (e.altKey && node.groupId) {
+      deepSelectNode(node.id);
+      activeSelectedIds = [node.id];
+    } else if (e.shiftKey) {
       toggleNodeSelection(node.id);
       activeSelectedIds = globalCourseStore.getState().selectedNodeIds;
     } else {
@@ -525,15 +552,17 @@ export const CanvasAdapter: React.FC = () => {
       }
     });
 
+    const composite = computeCompositeBounds(Object.values(initialNodesMap));
+
     setDragState({
       type: 'move',
       nodeId: node.id,
       startX: e.clientX,
       startY: e.clientY,
-      initialX: node.x,
-      initialY: node.y,
-      initialWidth: node.width,
-      initialHeight: node.height,
+      initialX: composite ? composite.x : node.x,
+      initialY: composite ? composite.y : node.y,
+      initialWidth: composite ? composite.width : node.width,
+      initialHeight: composite ? composite.height : node.height,
       initialNodesMap,
     });
   };
@@ -560,15 +589,17 @@ export const CanvasAdapter: React.FC = () => {
     const firstNode = currentPage.nodes.find((n) => selectedNodeIds.includes(n.id));
     if (!firstNode) return;
 
+    const composite = computeCompositeBounds(Object.values(initialNodesMap));
+
     setDragState({
       type: 'move',
       nodeId: firstNode.id,
       startX: e.clientX,
       startY: e.clientY,
-      initialX: firstNode.x,
-      initialY: firstNode.y,
-      initialWidth: firstNode.width,
-      initialHeight: firstNode.height,
+      initialX: composite ? composite.x : firstNode.x,
+      initialY: composite ? composite.y : firstNode.y,
+      initialWidth: composite ? composite.width : firstNode.width,
+      initialHeight: composite ? composite.height : firstNode.height,
       initialNodesMap,
     });
   };
@@ -810,8 +841,16 @@ export const CanvasAdapter: React.FC = () => {
         const curW = dragState.initialWidth || 40;
         const curH = dragState.initialHeight || 40;
 
+        const movingIdSet = new Set(
+          dragState.initialNodesMap
+            ? Object.keys(dragState.initialNodesMap)
+            : dragState.nodeId
+            ? [dragState.nodeId]
+            : selectedNodeIds
+        );
+
         const otherNodes: NodeBounds[] = (currentPage.nodes || [])
-          .filter((n) => !selectedNodeIds.includes(n.id))
+          .filter((n) => !movingIdSet.has(n.id))
           .map((n) => ({
             id: n.id,
             x: n.x,
@@ -832,7 +871,8 @@ export const CanvasAdapter: React.FC = () => {
           gridSize,
           isSnapToGridEnabled,
           8,
-          currentPage.guides || []
+          showGuides ? currentPage.guides || [] : [],
+          isSmartGuidesEnabled
         );
 
         const newX = Math.round(snapResult.x);
@@ -868,6 +908,32 @@ export const CanvasAdapter: React.FC = () => {
           snapToGrid: isSnapToGridEnabled,
           gridSize,
         });
+
+        // Show grid guides on resize when snap to grid is active
+        if (isSnapToGridEnabled) {
+          const rGuidesX: SnapGuide[] = [];
+          const rGuidesY: SnapGuide[] = [];
+          if (dragState.resizeHandle.includes('w')) {
+            rGuidesX.push({ val: nextBounds.x, label: `Grid ${nextBounds.x}px`, type: 'grid' });
+          } else if (dragState.resizeHandle.includes('e')) {
+            rGuidesX.push({
+              val: nextBounds.x + nextBounds.width,
+              label: `Grid ${nextBounds.x + nextBounds.width}px`,
+              type: 'grid',
+            });
+          }
+          if (dragState.resizeHandle.includes('n')) {
+            rGuidesY.push({ val: nextBounds.y, label: `Grid ${nextBounds.y}px`, type: 'grid' });
+          } else if (dragState.resizeHandle.includes('s')) {
+            rGuidesY.push({
+              val: nextBounds.y + nextBounds.height,
+              label: `Grid ${nextBounds.y + nextBounds.height}px`,
+              type: 'grid',
+            });
+          }
+          setSmartGuidesX(rGuidesX);
+          setSmartGuidesY(rGuidesY);
+        }
 
         updateNode(dragState.nodeId, nextBounds, false);
       } else if (dragState.type === 'group-resize' && dragState.resizeHandle && dragState.targetGroupNodeIds) {
@@ -909,6 +975,8 @@ export const CanvasAdapter: React.FC = () => {
       canvasWidth,
       canvasHeight,
       isSnapToGridEnabled,
+      isSmartGuidesEnabled,
+      showGuides,
       gridSize,
       setPan,
       updateNode,
@@ -1658,6 +1726,36 @@ export const CanvasAdapter: React.FC = () => {
         <div className="w-[1px] h-4 bg-slate-700 mx-1" />
 
         <button
+          title={`Snap to Grid (${gridSize}px) — Double-click to open Grid Settings`}
+          onClick={() => setSnapToGrid(!isSnapToGridEnabled)}
+          onDoubleClick={() => setIsGridSettingsModalOpen(true)}
+          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer ${
+            isSnapToGridEnabled
+              ? 'bg-sky-600/90 text-white shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Grid className="w-3.5 h-3.5" />
+          <span className="hidden lg:inline">Grid</span>
+          <span className="text-[9px] font-mono opacity-80 hidden xl:inline">{gridSize}px</span>
+        </button>
+
+        <button
+          title="Toggle Smart Guides (Auto-align objects & spacing during drag)"
+          onClick={() => setSmartGuidesEnabled(!isSmartGuidesEnabled)}
+          className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer ${
+            isSmartGuidesEnabled
+              ? 'bg-fuchsia-600/85 text-white shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          }`}
+        >
+          <Magnet className="w-3.5 h-3.5" />
+          <span className="hidden lg:inline">Smart</span>
+        </button>
+
+        <div className="w-[1px] h-4 bg-slate-700 mx-1" />
+
+        <button
           title="Toggle Timeline Animation Editor (Shift + A)"
           onClick={() => setIsTimelineOpen(!isTimelineOpen)}
           className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer ${
@@ -1867,6 +1965,47 @@ export const CanvasAdapter: React.FC = () => {
         }}
         onContextMenu={handleStageContextMenu}
       >
+        {/* Visual Snap-to-Grid Stage Overlay */}
+        {isSnapToGridEnabled && gridSize > 0 && (
+          <svg
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full pointer-events-none z-10 rounded-lg overflow-hidden"
+          >
+            <defs>
+              <pattern
+                id="stage-snap-grid-minor"
+                width={gridSize}
+                height={gridSize}
+                patternUnits="userSpaceOnUse"
+              >
+                <path
+                  d={`M ${gridSize} 0 L 0 0 0 ${gridSize}`}
+                  fill="none"
+                  stroke={gridColor || '#38bdf8'}
+                  strokeOpacity={0.18}
+                  strokeWidth={0.75}
+                />
+              </pattern>
+              <pattern
+                id="stage-snap-grid-major"
+                width={gridSize * 5}
+                height={gridSize * 5}
+                patternUnits="userSpaceOnUse"
+              >
+                <rect width={gridSize * 5} height={gridSize * 5} fill="url(#stage-snap-grid-minor)" />
+                <path
+                  d={`M ${gridSize * 5} 0 L 0 0 0 ${gridSize * 5}`}
+                  fill="none"
+                  stroke={gridColor || '#38bdf8'}
+                  strokeOpacity={0.34}
+                  strokeWidth={1}
+                />
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#stage-snap-grid-major)" />
+          </svg>
+        )}
+
         {/* Horizontal Canvas Ruler (Top Edge) */}
         {showRulers && (
           <>
@@ -2329,9 +2468,16 @@ export const CanvasAdapter: React.FC = () => {
           </div>
         )}
 
-        {/* Smart Guide & Tide-Snap Alignment Lines Overlay */}
-        {showGuides &&
-          smartGuidesX.map((guide, idx) => {
+        {/* Smart Guide, Magnetic Guide & Grid Snap Alignment Lines Overlay */}
+        {smartGuidesX
+          .filter((guide) =>
+            guide.type === 'grid'
+              ? isSnapToGridEnabled
+              : guide.type === 'guide'
+              ? showGuides
+              : isSmartGuidesEnabled
+          )
+          .map((guide, idx) => {
             const isPage = guide.type === 'page-edge' || guide.type === 'page-center';
             const isGrid = guide.type === 'grid';
             const isGuide = guide.type === 'guide';
@@ -2379,8 +2525,15 @@ export const CanvasAdapter: React.FC = () => {
               </div>
             );
           })}
-        {showGuides &&
-          smartGuidesY.map((guide, idx) => {
+        {smartGuidesY
+          .filter((guide) =>
+            guide.type === 'grid'
+              ? isSnapToGridEnabled
+              : guide.type === 'guide'
+              ? showGuides
+              : isSmartGuidesEnabled
+          )
+          .map((guide, idx) => {
             const isPage = guide.type === 'page-edge' || guide.type === 'page-center';
             const isGrid = guide.type === 'grid';
             const isGuide = guide.type === 'guide';
@@ -2428,6 +2581,39 @@ export const CanvasAdapter: React.FC = () => {
               </div>
             );
           })}
+
+        {/* Deep-Selection Parent GroupedObject Ghost Outline */}
+        {deepSelectedNodeId && deepSelectedGroupId && (() => {
+          const parentMembers = currentPage.nodes.filter((n) => n.groupId === deepSelectedGroupId);
+          const parentBounds = computeCompositeBounds(parentMembers);
+          if (!parentBounds) return null;
+          const groupMeta = (currentPage.groups || []).find((g) => g.id === deepSelectedGroupId);
+          return (
+            <div
+              className="absolute border border-dashed border-amber-400/70 bg-amber-500/[0.03] pointer-events-none z-20 rounded"
+              style={{
+                left: `${parentBounds.x - 6}px`,
+                top: `${parentBounds.y - 6}px`,
+                width: `${parentBounds.width + 12}px`,
+                height: `${parentBounds.height + 12}px`,
+              }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  exitDeepSelect();
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="pointer-events-auto absolute -top-6 left-0 px-2 py-0.5 rounded bg-amber-950/95 hover:bg-amber-500 border border-amber-500/60 text-amber-300 hover:text-slate-950 text-[9px] font-bold flex items-center gap-1 shadow-lg cursor-pointer transition-colors"
+                title="Exit deep-selection and select the full GroupedObject (Esc)"
+              >
+                <Focus className="w-2.5 h-2.5" />
+                <span>{groupMeta?.name || 'GroupedObject'} • Click or Esc for Group</span>
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Visual Audio Waveform on Canvas */}
         {currentPage.audioNarration && (
@@ -2729,8 +2915,14 @@ export const CanvasAdapter: React.FC = () => {
               onPointerDown={(e) => handleNodePointerDown(e, node)}
               onClick={(e) => {
                 e.stopPropagation();
-                if (!didDragMoveRef.current && !e.shiftKey && selectedNodeIds.length > 1 && !node.groupId) {
+                if (!didDragMoveRef.current && !e.shiftKey && !e.altKey && selectedNodeIds.length > 1 && !node.groupId) {
                   setSelectedNodeId(node.id);
+                }
+              }}
+              onDoubleClick={(e) => {
+                if (node.groupId && deepSelectedNodeId !== node.id) {
+                  e.stopPropagation();
+                  deepSelectNode(node.id);
                 }
               }}
               onContextMenu={(e) => handleNodeContextMenu(e, node)}
@@ -2749,6 +2941,7 @@ export const CanvasAdapter: React.FC = () => {
                 <TextNodeRenderer
                   node={node as TextNode}
                   isSelected={isSelected}
+                  canEditOnDoubleClick={!node.groupId || deepSelectedNodeId === node.id}
                   variables={course.variables}
                   showVariablePreview={showVariablePreview}
                   onUpdateContent={(content) => updateNode(node.id, { content })}
@@ -2811,6 +3004,17 @@ export const CanvasAdapter: React.FC = () => {
                       >
                         {node.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                       </button>
+
+                      {deepSelectedNodeId === node.id && deepSelectedGroupId && (
+                        <button
+                          title="Select Parent GroupedObject (Esc)"
+                          onClick={() => exitDeepSelect()}
+                          className="px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <CornerUpLeft className="w-3 h-3" />
+                          <span>Group</span>
+                        </button>
+                      )}
 
                       {!node.isLocked && (
                         <>

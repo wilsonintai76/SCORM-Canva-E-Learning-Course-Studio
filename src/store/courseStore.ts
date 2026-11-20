@@ -14,6 +14,7 @@ import {
   QuizNode,
   SavedCustomAsset,
   CanvasGuide,
+  GroupedObject,
 } from '../types/schema';
 import { CYBERSECURITY_COURSE } from '../data/templates';
 import { SlideLayout } from '../data/slideLayouts';
@@ -39,7 +40,10 @@ export interface CourseStoreState {
   activePageIndex: number;
   selectedNodeId: string | null;
   selectedNodeIds: string[];
+  deepSelectedNodeId: string | null;
+  deepSelectedGroupId: string | null;
   isSnapToGridEnabled: boolean;
+  isSmartGuidesEnabled: boolean;
   gridSize: number;
   gridColor: string;
   zoom: number; // 0.5 to 2.0
@@ -109,7 +113,10 @@ export class CourseStore {
   private activePageIndex = 0;
   private selectedNodeId: string | null = null;
   private selectedNodeIds: string[] = [];
+  private deepSelectedNodeId: string | null = null;
+  private deepSelectedGroupId: string | null = null;
   private isSnapToGridEnabled = true;
+  private isSmartGuidesEnabled = true;
   private gridSize = 10;
   private gridColor = '#334155';
   private zoom = 1.0;
@@ -364,7 +371,10 @@ export class CourseStore {
       activePageIndex: this.activePageIndex,
       selectedNodeId: this.selectedNodeIds[0] || null,
       selectedNodeIds: this.selectedNodeIds,
+      deepSelectedNodeId: this.deepSelectedNodeId,
+      deepSelectedGroupId: this.deepSelectedGroupId,
       isSnapToGridEnabled: this.isSnapToGridEnabled,
+      isSmartGuidesEnabled: this.isSmartGuidesEnabled,
       gridSize: this.gridSize,
       gridColor: this.gridColor,
       zoom: this.zoom,
@@ -466,6 +476,11 @@ export class CourseStore {
 
   public setShowGuides(show: boolean): void {
     this.showGuides = show;
+    this.notify();
+  }
+
+  public setSmartGuidesEnabled(enabled: boolean): void {
+    this.isSmartGuidesEnabled = enabled;
     this.notify();
   }
 
@@ -836,10 +851,31 @@ export class CourseStore {
       const clone: Page = JSON.parse(JSON.stringify(src));
       clone.id = 'page_' + Math.random().toString(36).substring(2, 9);
       clone.title = `${src.title} (Copy)`;
-      clone.nodes = clone.nodes.map((n) => ({
-        ...n,
-        id: n.type + '_' + Math.random().toString(36).substring(2, 9),
-      }));
+      const idRemap = new Map<string, string>();
+      const groupRemap = new Map<string, string>();
+      clone.nodes = clone.nodes.map((n) => {
+        const nextId = n.type + '_' + Math.random().toString(36).substring(2, 9);
+        idRemap.set(n.id, nextId);
+        let nextGroupId = n.groupId;
+        if (n.groupId) {
+          if (!groupRemap.has(n.groupId)) {
+            groupRemap.set(n.groupId, 'group_' + Math.random().toString(36).substring(2, 9));
+          }
+          nextGroupId = groupRemap.get(n.groupId);
+        }
+        return {
+          ...n,
+          id: nextId,
+          groupId: nextGroupId,
+        };
+      });
+      if (clone.groups) {
+        clone.groups = clone.groups.map((g) => ({
+          ...g,
+          id: groupRemap.get(g.id) || 'group_' + Math.random().toString(36).substring(2, 9),
+          nodeIds: g.nodeIds.map((nid) => idRemap.get(nid) || nid),
+        }));
+      }
       this.course.pages.splice(idx + 1, 0, clone);
     });
     this.notify();
@@ -1200,6 +1236,17 @@ export class CourseStore {
     });
 
     page.nodes.push(...instantiatedNodes);
+    if (newGroupId) {
+      if (!page.groups) page.groups = [];
+      page.groups.push({
+        id: newGroupId,
+        name: asset.name,
+        nodeIds: instantiatedNodes.map((n) => n.id),
+        createdAt: new Date().toISOString(),
+      });
+    }
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     this.selectedNodeIds = instantiatedNodes.map((n) => n.id);
     this.selectedNodeId = instantiatedNodes[0]?.id || null;
     this.notify();
@@ -1284,11 +1331,15 @@ export class CourseStore {
       this.activePageIndex = index;
       this.selectedNodeId = null;
       this.selectedNodeIds = [];
+      this.deepSelectedNodeId = null;
+      this.deepSelectedGroupId = null;
       this.notify();
     }
   }
 
   public setSelectedNodeId(nodeId: string | null): void {
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     if (nodeId === null) {
       this.selectedNodeIds = [];
       this.selectedNodeId = null;
@@ -1296,7 +1347,7 @@ export class CourseStore {
       const page = this.course.pages[this.activePageIndex];
       const node = page?.nodes.find((n) => n.id === nodeId);
       if (node && node.groupId) {
-        // Select all nodes in this group
+        // Select all nodes in this GroupedObject
         const groupMemberIds = page.nodes
           .filter((n) => n.groupId === node.groupId)
           .map((n) => n.id);
@@ -1309,7 +1360,31 @@ export class CourseStore {
     this.notify();
   }
 
+  public deepSelectNode(nodeId: string): void {
+    const page = this.course.pages[this.activePageIndex];
+    const node = page?.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    this.selectedNodeIds = [nodeId];
+    this.selectedNodeId = nodeId;
+    this.deepSelectedNodeId = node.groupId ? nodeId : null;
+    this.deepSelectedGroupId = node.groupId || null;
+    this.notify();
+  }
+
+  public exitDeepSelect(): void {
+    const groupId = this.deepSelectedGroupId;
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
+    if (groupId) {
+      this.selectGroupMembers(groupId);
+      return;
+    }
+    this.notify();
+  }
+
   public setSelectedNodeIds(ids: string[] | null): void {
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     if (!ids || ids.length === 0) {
       this.selectedNodeIds = [];
       this.selectedNodeId = null;
@@ -1321,6 +1396,8 @@ export class CourseStore {
   }
 
   public toggleNodeSelection(nodeId: string): void {
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     const page = this.course.pages[this.activePageIndex];
     const node = page?.nodes.find((n) => n.id === nodeId);
     const targetIds = node?.groupId
@@ -1341,6 +1418,8 @@ export class CourseStore {
   public selectAllNodesOnSlide(): void {
     const page = this.course.pages[this.activePageIndex];
     if (!page) return;
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     const ids = page.nodes.filter((n) => !n.isHidden).map((n) => n.id);
     this.selectedNodeIds = ids;
     this.selectedNodeId = ids[0] || null;
@@ -1350,6 +1429,8 @@ export class CourseStore {
   public invertSelectionOnSlide(): void {
     const page = this.course.pages[this.activePageIndex];
     if (!page) return;
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     const currentSet = new Set(this.selectedNodeIds);
     const inverted = page.nodes
       .filter((n) => !n.isHidden && !currentSet.has(n.id))
@@ -1364,6 +1445,8 @@ export class CourseStore {
     if (!page || !groupId) return;
     const ids = page.nodes.filter((n) => n.groupId === groupId).map((n) => n.id);
     if (ids.length === 0) return;
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     this.selectedNodeIds = ids;
     this.selectedNodeId = ids[0];
     this.notify();
@@ -1377,6 +1460,44 @@ export class CourseStore {
     }
     this.selectedNodeId = nodeId;
     this.notify();
+  }
+
+  private syncPageGroups(page: Page): void {
+    const existingById = new Map<string, GroupedObject>(
+      (page.groups || []).map((g) => [g.id, g])
+    );
+    const groupedNodesMap = new Map<string, CanvasNode[]>();
+    page.nodes.forEach((node) => {
+      if (node.groupId) {
+        const list = groupedNodesMap.get(node.groupId) || [];
+        list.push(node);
+        groupedNodesMap.set(node.groupId, list);
+      }
+    });
+
+    const nextGroups: GroupedObject[] = [];
+    let counter = 1;
+    groupedNodesMap.forEach((members, gid) => {
+      if (members.length < 2) {
+        // Dissolve orphan single-member groups
+        members.forEach((m) => {
+          delete m.groupId;
+        });
+        return;
+      }
+      const existing = existingById.get(gid);
+      nextGroups.push({
+        id: gid,
+        name: existing?.name || `GroupedObject #${counter}`,
+        nodeIds: members.map((m) => m.id),
+        isLocked: members.every((m) => Boolean(m.isLocked)),
+        isCollapsed: existing?.isCollapsed,
+        createdAt: existing?.createdAt || new Date().toISOString(),
+      });
+      counter += 1;
+    });
+
+    page.groups = nextGroups;
   }
 
   public deleteSelectedNodes(): void {
@@ -1393,6 +1514,9 @@ export class CourseStore {
     this.pushUndo(`Delete ${ids.length} selected element${ids.length > 1 ? 's' : ''}`);
     const idSet = new Set(ids);
     page.nodes = page.nodes.filter((n) => !idSet.has(n.id));
+    this.syncPageGroups(page);
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
     this.selectedNodeIds = [];
     this.selectedNodeId = null;
     this.notify();
@@ -1408,30 +1532,53 @@ export class CourseStore {
     this.notify();
   }
 
-  public groupNodes(idsToGroup?: string[]): void {
-    const ids = idsToGroup || this.selectedNodeIds;
-    if (ids.length < 2) return;
+  public groupNodes(idsToGroup?: string[], customName?: string): GroupedObject | null {
+    const rawIds = idsToGroup || this.selectedNodeIds;
+    const uniqueIds = Array.from(new Set(rawIds));
+    if (uniqueIds.length < 2) return null;
     const page = this.course.pages[this.activePageIndex];
-    if (!page) return;
+    if (!page) return null;
 
-    this.pushUndo();
+    const validNodes = page.nodes.filter((n) => uniqueIds.includes(n.id));
+    if (validNodes.length < 2) return null;
+
+    this.pushUndo(`Group ${validNodes.length} elements`);
     const newGroupId = 'group_' + Math.random().toString(36).substring(2, 9);
+    const validIdSet = new Set(validNodes.map((n) => n.id));
     page.nodes.forEach((node) => {
-      if (ids.includes(node.id)) {
+      if (validIdSet.has(node.id)) {
         node.groupId = newGroupId;
       }
     });
-    this.selectedNodeIds = [...ids];
-    this.selectedNodeId = ids[0];
+
+    if (!page.groups) page.groups = [];
+    const nextGroupNumber = page.groups.length + 1;
+    const groupedObject: GroupedObject = {
+      id: newGroupId,
+      name: customName?.trim() || `GroupedObject #${nextGroupNumber}`,
+      nodeIds: validNodes.map((n) => n.id),
+      isLocked: validNodes.every((n) => Boolean(n.isLocked)),
+      createdAt: new Date().toISOString(),
+    };
+    page.groups.push(groupedObject);
+    this.syncPageGroups(page);
+
+    this.deepSelectedNodeId = null;
+    this.deepSelectedGroupId = null;
+    this.selectedNodeIds = validNodes.map((n) => n.id);
+    this.selectedNodeId = validNodes[0]?.id || null;
     this.notify();
+    return page.groups.find((g) => g.id === newGroupId) || groupedObject;
   }
 
   public ungroupNodes(targetGroupId?: string): void {
     const page = this.course.pages[this.activePageIndex];
     if (!page) return;
 
-    this.pushUndo();
+    this.pushUndo('Ungroup elements');
+    const clearedGroupIds = new Set<string>();
     if (targetGroupId) {
+      clearedGroupIds.add(targetGroupId);
       page.nodes.forEach((node) => {
         if (node.groupId === targetGroupId) {
           delete node.groupId;
@@ -1439,7 +1586,10 @@ export class CourseStore {
       });
     } else {
       const selectedNodes = page.nodes.filter((n) => this.selectedNodeIds.includes(n.id));
-      const groupIdsToClear = new Set(selectedNodes.map((n) => n.groupId).filter((id): id is string => Boolean(id)));
+      const groupIdsToClear = new Set(
+        selectedNodes.map((n) => n.groupId).filter((id): id is string => Boolean(id))
+      );
+      groupIdsToClear.forEach((gid) => clearedGroupIds.add(gid));
       page.nodes.forEach((node) => {
         if (node.groupId && groupIdsToClear.has(node.groupId)) {
           delete node.groupId;
@@ -1448,7 +1598,60 @@ export class CourseStore {
         }
       });
     }
+    if (page.groups) {
+      page.groups = page.groups.filter((g) => !clearedGroupIds.has(g.id));
+    }
+    this.syncPageGroups(page);
+    if (this.deepSelectedGroupId && clearedGroupIds.has(this.deepSelectedGroupId)) {
+      this.deepSelectedNodeId = null;
+      this.deepSelectedGroupId = null;
+    }
     this.notify();
+  }
+
+  public renameGroup(groupId: string, name: string): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page || !groupId || !name.trim()) return;
+    if (!page.groups) page.groups = [];
+    this.syncPageGroups(page);
+    const group = page.groups.find((g) => g.id === groupId);
+    if (!group) return;
+
+    this.pushUndo(`Rename group to ${name.trim()}`);
+    group.name = name.trim();
+    this.notify();
+  }
+
+  public moveGroup(
+    groupIdOrNodeIds: string | string[],
+    dx: number,
+    dy: number,
+    recordHistory = true
+  ): void {
+    const page = this.course.pages[this.activePageIndex];
+    if (!page) return;
+    const roundedDx = Math.round(dx);
+    const roundedDy = Math.round(dy);
+    if (roundedDx === 0 && roundedDy === 0) return;
+
+    const targetNodes =
+      typeof groupIdOrNodeIds === 'string'
+        ? page.nodes.filter((n) => n.groupId === groupIdOrNodeIds)
+        : page.nodes.filter((n) => groupIdOrNodeIds.includes(n.id));
+
+    const movableNodes = targetNodes.filter((n) => !n.isLocked);
+    if (movableNodes.length === 0) return;
+
+    if (recordHistory) {
+      this.pushUndo('Move group');
+    }
+
+    movableNodes.forEach((node) => {
+      node.x = Math.round(node.x + roundedDx);
+      node.y = Math.round(node.y + roundedDy);
+    });
+
+    this.notify(recordHistory);
   }
 
   public transformGroup(
@@ -1649,10 +1852,31 @@ export class CourseStore {
     const clone: Page = JSON.parse(JSON.stringify(src));
     clone.id = 'page_' + Math.random().toString(36).substring(2, 9);
     clone.title = `${src.title} (Copy)`;
-    clone.nodes = clone.nodes.map((n) => ({
-      ...n,
-      id: n.type + '_' + Math.random().toString(36).substring(2, 9),
-    }));
+    const idRemap = new Map<string, string>();
+    const groupRemap = new Map<string, string>();
+    clone.nodes = clone.nodes.map((n) => {
+      const nextId = n.type + '_' + Math.random().toString(36).substring(2, 9);
+      idRemap.set(n.id, nextId);
+      let nextGroupId = n.groupId;
+      if (n.groupId) {
+        if (!groupRemap.has(n.groupId)) {
+          groupRemap.set(n.groupId, 'group_' + Math.random().toString(36).substring(2, 9));
+        }
+        nextGroupId = groupRemap.get(n.groupId);
+      }
+      return {
+        ...n,
+        id: nextId,
+        groupId: nextGroupId,
+      };
+    });
+    if (clone.groups) {
+      clone.groups = clone.groups.map((g) => ({
+        ...g,
+        id: groupRemap.get(g.id) || 'group_' + Math.random().toString(36).substring(2, 9),
+        nodeIds: g.nodeIds.map((nid) => idRemap.get(nid) || nid),
+      }));
+    }
     this.course.pages.splice(index + 1, 0, clone);
     this.activePageIndex = index + 1;
     this.notify();
@@ -1943,7 +2167,12 @@ export class CourseStore {
 
     this.pushUndo();
     page.nodes.splice(nodeIdx, 1);
+    this.syncPageGroups(page);
     this.selectedNodeIds = this.selectedNodeIds.filter((id) => id !== nodeId);
+    if (this.deepSelectedNodeId === nodeId) {
+      this.deepSelectedNodeId = null;
+      this.deepSelectedGroupId = null;
+    }
     if (this.selectedNodeId === nodeId) {
       this.selectedNodeId = this.selectedNodeIds[0] || null;
     }
@@ -2303,6 +2532,8 @@ export function useCourseStore() {
     updateManifest: (updates: Partial<CourseManifest>) => globalCourseStore.updateManifest(updates),
     setActivePage: (idx: number) => globalCourseStore.setActivePage(idx),
     setSelectedNodeId: (id: string | null) => globalCourseStore.setSelectedNodeId(id),
+    deepSelectNode: (id: string) => globalCourseStore.deepSelectNode(id),
+    exitDeepSelect: () => globalCourseStore.exitDeepSelect(),
     setSelectedNodeIds: (ids: string[] | null) => globalCourseStore.setSelectedNodeIds(ids),
     toggleNodeSelection: (id: string) => globalCourseStore.toggleNodeSelection(id),
     selectAllNodesOnSlide: () => globalCourseStore.selectAllNodesOnSlide(),
@@ -2311,9 +2542,13 @@ export function useCourseStore() {
     setPrimarySelectedNode: (nodeId: string) => globalCourseStore.setPrimarySelectedNode(nodeId),
     deleteSelectedNodes: () => globalCourseStore.deleteSelectedNodes(),
     setSnapToGrid: (enabled: boolean) => globalCourseStore.setSnapToGrid(enabled),
+    setSmartGuidesEnabled: (enabled: boolean) => globalCourseStore.setSmartGuidesEnabled(enabled),
     setGridSize: (size: number) => globalCourseStore.setGridSize(size),
-    groupNodes: (ids?: string[]) => globalCourseStore.groupNodes(ids),
+    groupNodes: (ids?: string[], name?: string) => globalCourseStore.groupNodes(ids, name),
     ungroupNodes: (groupId?: string) => globalCourseStore.ungroupNodes(groupId),
+    renameGroup: (groupId: string, name: string) => globalCourseStore.renameGroup(groupId, name),
+    moveGroup: (groupIdOrNodeIds: string | string[], dx: number, dy: number, recordHistory = true) =>
+      globalCourseStore.moveGroup(groupIdOrNodeIds, dx, dy, recordHistory),
     transformGroup: (
       groupIdOrNodeIds: string | string[],
       newBounds: { x: number; y: number; width: number; height: number },

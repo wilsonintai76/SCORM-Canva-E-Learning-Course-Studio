@@ -5,6 +5,7 @@ import { interpolateVariables } from '../../../utils/variableInterpolator';
 interface Props {
   node: TextNode;
   isSelected: boolean;
+  canEditOnDoubleClick?: boolean;
   variables?: CourseVariable[];
   showVariablePreview?: boolean;
   onUpdateContent: (content: string) => void;
@@ -13,6 +14,7 @@ interface Props {
 export const TextNodeRenderer: React.FC<Props> = ({
   node,
   isSelected,
+  canEditOnDoubleClick = true,
   variables = [],
   showVariablePreview = true,
   onUpdateContent,
@@ -20,6 +22,9 @@ export const TextNodeRenderer: React.FC<Props> = ({
   const [isEditing, setIsEditing] = useState(false);
 
   const handleDoubleClick = (e: React.MouseEvent) => {
+    if (!canEditOnDoubleClick) {
+      return;
+    }
     e.stopPropagation();
     if (node.isLocked) return;
     setIsEditing(true);

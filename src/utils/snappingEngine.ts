@@ -45,13 +45,31 @@ export function snapValueToGrid(
 }
 
 /**
- * Calculates snapping coordinates for an element being dragged across the canvas:
+ * Computes the combined bounding box for a set of nodes (e.g., a GroupedObject or multi-selection).
+ */
+export function computeCompositeBounds(
+  nodes: Array<{ x: number; y: number; width: number; height: number }>
+): { x: number; y: number; width: number; height: number } | null {
+  if (!nodes || nodes.length === 0) return null;
+  const minX = Math.min(...nodes.map((n) => n.x));
+  const minY = Math.min(...nodes.map((n) => n.y));
+  const maxX = Math.max(...nodes.map((n) => n.x + n.width));
+  const maxY = Math.max(...nodes.map((n) => n.y + n.height));
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  };
+}
+
+/**
+ * Calculates snapping coordinates for an element or GroupedObject being dragged across the canvas:
  * 1. User Magnetic Guides
- * 2. Tide-Snapping Equal Spacing & Gaps (Smart Layout Suggestions)
- * 3. Adjacent Component Edge Docking
- * 4. Page Edges & Center Lines
- * 5. Other Component Edges (Left, Center, Right, Top, Middle, Bottom)
- * 6. Grid Lines
+ * 2. Page Boundaries, Safe Margins & Center Lines
+ * 3. Other Component Edges & Centers (Smart Guides)
+ * 4. Tide-Snapping Equal Spacing & Gaps
+ * 5. Grid Lines (Snap to Grid)
  */
 export function calculateSnapping(
   rawX: number,
@@ -64,209 +82,138 @@ export function calculateSnapping(
   gridSize: number,
   isSnapToGridEnabled: boolean,
   threshold = 8,
-  userGuides: CanvasGuide[] = []
+  userGuides: CanvasGuide[] = [],
+  enableSmartGuides = true
 ): SnapCalculationResult {
   const guidesX: SnapGuide[] = [];
   const guidesY: SnapGuide[] = [];
 
-  // --- 1. Candidate Horizontal X Snap Points ---
   const candX: SnapGuide[] = [];
-
-  // Priority 1: User-created Magnetic Guides (Vertical lines snap X coordinates)
-  if (userGuides && userGuides.length > 0) {
-    userGuides
-      .filter((g) => g.orientation === 'vertical')
-      .forEach((g) => {
-        candX.push({
-          val: g.position,
-          label: `Guide ${g.position}px`,
-          type: 'guide',
-        });
-      });
-  }
-
-  // Priority 2: Tide-Snapping & Equal Spacing (Horizontal Gaps between pairs)
-  if (otherNodes.length >= 2) {
-    const sortedNodesX = [...otherNodes].sort((a, b) => a.x - b.x);
-    for (let i = 0; i < sortedNodesX.length; i++) {
-      for (let j = i + 1; j < sortedNodesX.length; j++) {
-        const n1 = sortedNodesX[i];
-        const n2 = sortedNodesX[j];
-        const gap = n2.x - (n1.x + n1.width);
-        if (gap >= 6) {
-          const roundedGap = Math.round(gap);
-          // Placement to the right of n2
-          candX.push({
-            val: n2.x + n2.width + gap,
-            label: `Tide-Snap: Equal Gap (${roundedGap}px)`,
-            type: 'tide-snap',
-            gap: roundedGap,
-          });
-          // Placement to the left of n1
-          candX.push({
-            val: n1.x - gap,
-            label: `Tide-Snap: Equal Gap (${roundedGap}px)`,
-            type: 'tide-snap',
-            gap: roundedGap,
-          });
-          // Placement centered between n1 and n2
-          if (gap > width + 6) {
-            const centerGap = Math.round((gap - width) / 2);
-            candX.push({
-              val: n1.x + n1.width + centerGap,
-              label: `Tide-Snap: Centered Gap (${centerGap}px)`,
-              type: 'tide-snap',
-              gap: centerGap,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // Priority 3: Page boundaries & margins
-  candX.push(
-    { val: 0, label: 'Page Left', type: 'page-edge' },
-    { val: Math.round(canvasWidth / 2), label: 'Center-X', type: 'page-center' },
-    { val: canvasWidth, label: 'Page Right', type: 'page-edge' },
-    { val: 40, label: 'Margin Left (40px)', type: 'page-edge' },
-    { val: canvasWidth - 40, label: 'Margin Right', type: 'page-edge' }
-  );
-
-  // Priority 4: Other components' X points (Left, Center, Right)
-  otherNodes.forEach((node) => {
-    const nodeLabel = node.type ? `${node.type.toUpperCase()}` : 'Object';
-    candX.push(
-      { val: node.x, label: `${nodeLabel} Left`, type: 'component' },
-      { val: Math.round(node.x + node.width / 2), label: `${nodeLabel} Center-X`, type: 'component' },
-      { val: node.x + node.width, label: `${nodeLabel} Right`, type: 'component' }
-    );
-  });
-
-  // Priority 5: Adjacent Edge Docking (Smart Layout Spacing)
-  otherNodes.forEach((node) => {
-    const nodeLabel = node.type ? `${node.type.toUpperCase()}` : 'Object';
-    candX.push({
-      val: node.x + node.width,
-      label: `Dock Right of ${nodeLabel}`,
-      type: 'smart-spacing',
-    });
-    candX.push({
-      val: node.x,
-      label: `Dock Left of ${nodeLabel}`,
-      type: 'smart-spacing',
-    });
-  });
-
-  // --- 2. Candidate Vertical Y Snap Points ---
   const candY: SnapGuide[] = [];
 
-  // Priority 1: User-created Magnetic Guides (Horizontal lines snap Y coordinates)
-  if (userGuides && userGuides.length > 0) {
-    userGuides
-      .filter((g) => g.orientation === 'horizontal')
-      .forEach((g) => {
-        candY.push({
-          val: g.position,
-          label: `Guide ${g.position}px`,
-          type: 'guide',
-        });
+  if (enableSmartGuides) {
+    // Priority 1: User-created Magnetic Guides
+    if (userGuides && userGuides.length > 0) {
+      userGuides.forEach((g) => {
+        if (g.orientation === 'vertical') {
+          candX.push({
+            val: g.position,
+            label: `Guide ${g.position}px`,
+            type: 'guide',
+          });
+        } else {
+          candY.push({
+            val: g.position,
+            label: `Guide ${g.position}px`,
+            type: 'guide',
+          });
+        }
       });
-  }
+    }
 
-  // Priority 2: Tide-Snapping & Equal Spacing (Vertical Gaps between pairs)
-  if (otherNodes.length >= 2) {
-    const sortedNodesY = [...otherNodes].sort((a, b) => a.y - b.y);
-    for (let i = 0; i < sortedNodesY.length; i++) {
-      for (let j = i + 1; j < sortedNodesY.length; j++) {
-        const n1 = sortedNodesY[i];
-        const n2 = sortedNodesY[j];
-        const gap = n2.y - (n1.y + n1.height);
-        if (gap >= 6) {
-          const roundedGap = Math.round(gap);
-          // Placement below n2
-          candY.push({
-            val: n2.y + n2.height + gap,
-            label: `Tide-Snap: Equal Vertical Gap (${roundedGap}px)`,
-            type: 'tide-snap',
-            gap: roundedGap,
-          });
-          // Placement above n1
-          candY.push({
-            val: n1.y - gap,
-            label: `Tide-Snap: Equal Vertical Gap (${roundedGap}px)`,
-            type: 'tide-snap',
-            gap: roundedGap,
-          });
-          // Placement centered between n1 and n2
-          if (gap > height + 6) {
-            const centerGap = Math.round((gap - height) / 2);
-            candY.push({
-              val: n1.y + n1.height + centerGap,
-              label: `Tide-Snap: Centered Vertical Gap (${centerGap}px)`,
+    // Priority 2: Page boundaries, center lines & 40px safe margins
+    candX.push(
+      { val: Math.round(canvasWidth / 2), label: 'Center-X', type: 'page-center' },
+      { val: 0, label: 'Page Left', type: 'page-edge' },
+      { val: canvasWidth, label: 'Page Right', type: 'page-edge' },
+      { val: 40, label: 'Margin Left', type: 'page-edge' },
+      { val: canvasWidth - 40, label: 'Margin Right', type: 'page-edge' }
+    );
+
+    candY.push(
+      { val: Math.round(canvasHeight / 2), label: 'Center-Y', type: 'page-center' },
+      { val: 0, label: 'Page Top', type: 'page-edge' },
+      { val: canvasHeight, label: 'Page Bottom', type: 'page-edge' },
+      { val: 40, label: 'Margin Top', type: 'page-edge' },
+      { val: canvasHeight - 40, label: 'Margin Bottom', type: 'page-edge' }
+    );
+
+    // Priority 3: Other components' edges & centers
+    otherNodes.forEach((node) => {
+      const nodeLabel = node.type ? `${node.type.toUpperCase()}` : 'Object';
+      candX.push(
+        { val: node.x, label: `${nodeLabel} Left`, type: 'component' },
+        { val: Math.round(node.x + node.width / 2), label: `${nodeLabel} Center-X`, type: 'component' },
+        { val: node.x + node.width, label: `${nodeLabel} Right`, type: 'component' }
+      );
+      candY.push(
+        { val: node.y, label: `${nodeLabel} Top`, type: 'component' },
+        { val: Math.round(node.y + node.height / 2), label: `${nodeLabel} Center-Y`, type: 'component' },
+        { val: node.y + node.height, label: `${nodeLabel} Bottom`, type: 'component' }
+      );
+    });
+
+    // Priority 4: Tide-Snapping & Equal Spacing
+    if (otherNodes.length >= 2) {
+      const sortedNodesX = [...otherNodes].sort((a, b) => a.x - b.x);
+      for (let i = 0; i < sortedNodesX.length; i++) {
+        for (let j = i + 1; j < sortedNodesX.length; j++) {
+          const n1 = sortedNodesX[i];
+          const n2 = sortedNodesX[j];
+          const gap = n2.x - (n1.x + n1.width);
+          if (gap >= 6) {
+            const roundedGap = Math.round(gap);
+            candX.push({
+              val: n2.x + n2.width + gap,
+              label: `Equal Gap (${roundedGap}px)`,
               type: 'tide-snap',
-              gap: centerGap,
+              gap: roundedGap,
             });
+            candX.push({
+              val: n1.x - gap,
+              label: `Equal Gap (${roundedGap}px)`,
+              type: 'tide-snap',
+              gap: roundedGap,
+            });
+            if (gap > width + 6) {
+              const centerGap = Math.round((gap - width) / 2);
+              candX.push({
+                val: n1.x + n1.width + centerGap,
+                label: `Centered Gap (${centerGap}px)`,
+                type: 'tide-snap',
+                gap: centerGap,
+              });
+            }
+          }
+        }
+      }
+
+      const sortedNodesY = [...otherNodes].sort((a, b) => a.y - b.y);
+      for (let i = 0; i < sortedNodesY.length; i++) {
+        for (let j = i + 1; j < sortedNodesY.length; j++) {
+          const n1 = sortedNodesY[i];
+          const n2 = sortedNodesY[j];
+          const gap = n2.y - (n1.y + n1.height);
+          if (gap >= 6) {
+            const roundedGap = Math.round(gap);
+            candY.push({
+              val: n2.y + n2.height + gap,
+              label: `Equal Vertical Gap (${roundedGap}px)`,
+              type: 'tide-snap',
+              gap: roundedGap,
+            });
+            candY.push({
+              val: n1.y - gap,
+              label: `Equal Vertical Gap (${roundedGap}px)`,
+              type: 'tide-snap',
+              gap: roundedGap,
+            });
+            if (gap > height + 6) {
+              const centerGap = Math.round((gap - height) / 2);
+              candY.push({
+                val: n1.y + n1.height + centerGap,
+                label: `Centered Vertical Gap (${centerGap}px)`,
+                type: 'tide-snap',
+                gap: centerGap,
+              });
+            }
           }
         }
       }
     }
   }
 
-  // Priority 3: Page boundaries & margins
-  candY.push(
-    { val: 0, label: 'Page Top', type: 'page-edge' },
-    { val: Math.round(canvasHeight / 2), label: 'Center-Y', type: 'page-center' },
-    { val: canvasHeight, label: 'Page Bottom', type: 'page-edge' },
-    { val: 40, label: 'Margin Top (40px)', type: 'page-edge' },
-    { val: canvasHeight - 40, label: 'Margin Bottom', type: 'page-edge' }
-  );
-
-  // Priority 4: Other components' Y points (Top, Center, Bottom)
-  otherNodes.forEach((node) => {
-    const nodeLabel = node.type ? `${node.type.toUpperCase()}` : 'Object';
-    candY.push(
-      { val: node.y, label: `${nodeLabel} Top`, type: 'component' },
-      { val: Math.round(node.y + node.height / 2), label: `${nodeLabel} Center-Y`, type: 'component' },
-      { val: node.y + node.height, label: `${nodeLabel} Bottom`, type: 'component' }
-    );
-  });
-
-  // Priority 5: Adjacent Edge Docking (Smart Layout Spacing)
-  otherNodes.forEach((node) => {
-    const nodeLabel = node.type ? `${node.type.toUpperCase()}` : 'Object';
-    candY.push({
-      val: node.y + node.height,
-      label: `Dock Bottom of ${nodeLabel}`,
-      type: 'smart-spacing',
-    });
-    candY.push({
-      val: node.y,
-      label: `Dock Top of ${nodeLabel}`,
-      type: 'smart-spacing',
-    });
-  });
-
-  // Priority 3: Page boundaries & margins
-  candY.push(
-    { val: 0, label: 'Page Top', type: 'page-edge' },
-    { val: Math.round(canvasHeight / 2), label: 'Center-Y', type: 'page-center' },
-    { val: canvasHeight, label: 'Page Bottom', type: 'page-edge' },
-    { val: 40, label: 'Margin Top (40px)', type: 'page-edge' },
-    { val: canvasHeight - 40, label: 'Margin Bottom', type: 'page-edge' }
-  );
-
-  // Priority 4: Other components' Y points
-  otherNodes.forEach((node) => {
-    const nodeLabel = node.type ? `${node.type.toUpperCase()}` : 'Object';
-    candY.push(
-      { val: node.y, label: `${nodeLabel} Top`, type: 'component' },
-      { val: Math.round(node.y + node.height / 2), label: `${nodeLabel} Center-Y`, type: 'component' },
-      { val: node.y + node.height, label: `${nodeLabel} Bottom`, type: 'component' }
-    );
-  });
-
-  // Points of the moving element being evaluated
+  // Points of the moving element (or composite group) being evaluated
   const movingX = [
     { val: rawX, offset: 0, part: 'Left' },
     { val: rawX + width / 2, offset: width / 2, part: 'Center' },
@@ -275,38 +222,63 @@ export function calculateSnapping(
 
   const movingY = [
     { val: rawY, offset: 0, part: 'Top' },
-    { val: rawY + height / 2, offset: height / 2, part: 'Center' },
+    { val: rawY + height / 2, offset: height / 2, part: 'Middle' },
     { val: rawY + height, offset: height, part: 'Bottom' },
   ];
 
   let snappedX = rawX;
   let didSnapX = false;
 
-  // Check component and page edge snapping for X
-  for (const movePt of movingX) {
-    for (const target of candX) {
-      if (Math.abs(movePt.val - target.val) <= threshold) {
-        snappedX = Math.round(target.val - movePt.offset);
-        guidesX.push({
-          val: target.val,
-          label: `${target.label}`,
-          type: target.type,
-        });
-        didSnapX = true;
-        break;
+  // Find closest Smart Guide snap on X
+  if (enableSmartGuides && candX.length > 0) {
+    let bestDiff = threshold + 0.001;
+    let bestTarget: SnapGuide | null = null;
+    let bestOffset = 0;
+
+    for (const movePt of movingX) {
+      for (const target of candX) {
+        const diff = Math.abs(movePt.val - target.val);
+        if (diff <= threshold && diff < bestDiff) {
+          bestDiff = diff;
+          bestTarget = target;
+          bestOffset = movePt.offset;
+        }
       }
     }
-    if (didSnapX) break;
+
+    if (bestTarget) {
+      snappedX = Math.round(bestTarget.val - bestOffset);
+      didSnapX = true;
+      guidesX.push({
+        val: bestTarget.val,
+        label: bestTarget.label,
+        type: bestTarget.type,
+        gap: bestTarget.gap,
+      });
+    }
   }
 
-  // If not snapped to component or page edge, snap to grid if enabled
+  // Snap to Grid X if enabled and no higher-priority Smart Guide snapped
   if (!didSnapX && isSnapToGridEnabled && gridSize > 0) {
-    const gridSnap = snapValueToGrid(rawX, gridSize, threshold);
-    if (gridSnap.didSnap) {
-      snappedX = gridSnap.val;
+    const effectiveThreshold = Math.max(threshold, Math.floor(gridSize / 2));
+    const leftSnap = snapValueToGrid(rawX, gridSize, effectiveThreshold);
+    const rightSnap = snapValueToGrid(rawX + width, gridSize, effectiveThreshold);
+
+    const leftDist = Math.abs(rawX - leftSnap.val);
+    const rightDist = Math.abs(rawX + width - rightSnap.val);
+
+    if (leftSnap.didSnap && (!rightSnap.didSnap || leftDist <= rightDist)) {
+      snappedX = leftSnap.val;
       guidesX.push({
-        val: gridSnap.val,
-        label: `Grid ${gridSnap.val}px`,
+        val: leftSnap.val,
+        label: `Grid ${leftSnap.val}px`,
+        type: 'grid',
+      });
+    } else if (rightSnap.didSnap) {
+      snappedX = Math.round(rightSnap.val - width);
+      guidesX.push({
+        val: rightSnap.val,
+        label: `Grid ${rightSnap.val}px`,
         type: 'grid',
       });
     } else {
@@ -319,31 +291,56 @@ export function calculateSnapping(
   let snappedY = rawY;
   let didSnapY = false;
 
-  // Check component and page edge snapping for Y
-  for (const movePt of movingY) {
-    for (const target of candY) {
-      if (Math.abs(movePt.val - target.val) <= threshold) {
-        snappedY = Math.round(target.val - movePt.offset);
-        guidesY.push({
-          val: target.val,
-          label: `${target.label}`,
-          type: target.type,
-        });
-        didSnapY = true;
-        break;
+  // Find closest Smart Guide snap on Y
+  if (enableSmartGuides && candY.length > 0) {
+    let bestDiff = threshold + 0.001;
+    let bestTarget: SnapGuide | null = null;
+    let bestOffset = 0;
+
+    for (const movePt of movingY) {
+      for (const target of candY) {
+        const diff = Math.abs(movePt.val - target.val);
+        if (diff <= threshold && diff < bestDiff) {
+          bestDiff = diff;
+          bestTarget = target;
+          bestOffset = movePt.offset;
+        }
       }
     }
-    if (didSnapY) break;
+
+    if (bestTarget) {
+      snappedY = Math.round(bestTarget.val - bestOffset);
+      didSnapY = true;
+      guidesY.push({
+        val: bestTarget.val,
+        label: bestTarget.label,
+        type: bestTarget.type,
+        gap: bestTarget.gap,
+      });
+    }
   }
 
-  // If not snapped to component or page edge, snap to grid if enabled
+  // Snap to Grid Y if enabled and no higher-priority Smart Guide snapped
   if (!didSnapY && isSnapToGridEnabled && gridSize > 0) {
-    const gridSnap = snapValueToGrid(rawY, gridSize, threshold);
-    if (gridSnap.didSnap) {
-      snappedY = gridSnap.val;
+    const effectiveThreshold = Math.max(threshold, Math.floor(gridSize / 2));
+    const topSnap = snapValueToGrid(rawY, gridSize, effectiveThreshold);
+    const bottomSnap = snapValueToGrid(rawY + height, gridSize, effectiveThreshold);
+
+    const topDist = Math.abs(rawY - topSnap.val);
+    const bottomDist = Math.abs(rawY + height - bottomSnap.val);
+
+    if (topSnap.didSnap && (!bottomSnap.didSnap || topDist <= bottomDist)) {
+      snappedY = topSnap.val;
       guidesY.push({
-        val: gridSnap.val,
-        label: `Grid ${gridSnap.val}px`,
+        val: topSnap.val,
+        label: `Grid ${topSnap.val}px`,
+        type: 'grid',
+      });
+    } else if (bottomSnap.didSnap) {
+      snappedY = Math.round(bottomSnap.val - height);
+      guidesY.push({
+        val: bottomSnap.val,
+        label: `Grid ${bottomSnap.val}px`,
         type: 'grid',
       });
     } else {
